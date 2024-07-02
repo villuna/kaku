@@ -1,0 +1,18 @@
+[package]
+name = "kaku"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ab_glyph = "0.2.26"
+ahash = "0.8.11"
+image = "0.25.1"
+itertools = "0.13.0"
+wgpu = "0.20.1"
+log = "0.4.21"
+bytemuck = { version = "1.16.1", features = ["derive"] }
+
+[dev-dependencies]
+winit = { version = "0.30.3", features = ["rwh_05"] }
+env_logger = "0.11.3"
+pollster = "0.3.0"
