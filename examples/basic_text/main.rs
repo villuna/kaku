@@ -13,9 +13,12 @@ use winit::{
     window::Window,
 };
 
-use kaku::{FontId, Text, TextData, TextOptions, TextRenderer};
+use kaku::{
+    text::{Text, TextData, TextOptions},
+    FontId, TextRenderer,
+};
 
-const FPS_POLL_TIME_LIMIT: f32 = 1./60.;
+const FPS_POLL_TIME_LIMIT: f32 = 0.5;
 
 struct BasicTextAppInner {
     renderer: Renderer,
@@ -37,8 +40,10 @@ impl BasicTextAppInner {
     fn new(window: Arc<Window>) -> Self {
         let renderer = Renderer::new(window);
         let mut text_renderer = TextRenderer::new(&renderer.device, &renderer.config);
-        let noto_sans = FontRef::try_from_slice(include_bytes!("../fonts/NotoSansJP-Regular.ttf")).unwrap();
-        let fira_sans = FontRef::try_from_slice(include_bytes!("../fonts/FiraSans-Regular.ttf")).unwrap();
+        let noto_sans =
+            FontRef::try_from_slice(include_bytes!("../fonts/NotoSansJP-Regular.ttf")).unwrap();
+        let fira_sans =
+            FontRef::try_from_slice(include_bytes!("../fonts/FiraSans-Regular.ttf")).unwrap();
         let noto_sans = text_renderer.load_font(noto_sans, 20.);
         let fira_sans = text_renderer.load_font(fira_sans, 48.);
 
@@ -50,7 +55,7 @@ impl BasicTextAppInner {
                 Default::default(),
             ),
             &renderer.device,
-            &renderer.queue
+            &renderer.queue,
         );
 
         let jp_text = text_renderer.create_text(
@@ -61,7 +66,7 @@ impl BasicTextAppInner {
                 TextOptions {
                     colour: [0.5, 0.1, 0.6, 1.],
                     ..Default::default()
-                }
+                },
             ),
             &renderer.device,
             &renderer.queue,
@@ -116,7 +121,6 @@ impl BasicTextAppInner {
                 &self.renderer.queue,
             );
 
-
             self.frame_count = 0.;
             self.fps_poll_start = Instant::now();
         }
@@ -128,11 +132,12 @@ impl BasicTextAppInner {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder = self.renderer
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
-            });
+        let mut encoder =
+            self.renderer
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Render Encoder"),
+                });
 
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Render Pass"),
@@ -155,13 +160,18 @@ impl BasicTextAppInner {
         });
 
         // Important code is here!
-        self.text_renderer.draw_text(&mut render_pass, &self.hello_world);
-        self.text_renderer.draw_text(&mut render_pass, &self.jp_text);
-        self.text_renderer.draw_text(&mut render_pass, &self.fps_text);
-            
+        self.text_renderer
+            .draw_text(&mut render_pass, &self.hello_world);
+        self.text_renderer
+            .draw_text(&mut render_pass, &self.jp_text);
+        self.text_renderer
+            .draw_text(&mut render_pass, &self.fps_text);
+
         drop(render_pass);
 
-        self.renderer.queue.submit(std::iter::once(encoder.finish()));
+        self.renderer
+            .queue
+            .submit(std::iter::once(encoder.finish()));
         output.present();
 
         Ok(())
@@ -183,7 +193,9 @@ impl ApplicationHandler for BasicTextApp {
         window_id: winit::window::WindowId,
         event: winit::event::WindowEvent,
     ) {
-        let Some(inner) = self.inner.as_mut() else { return; };
+        let Some(inner) = self.inner.as_mut() else {
+            return;
+        };
         if window_id == inner.renderer.window.id() {
             match event {
                 WindowEvent::CloseRequested
@@ -209,7 +221,9 @@ impl ApplicationHandler for BasicTextApp {
     }
 
     fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        let Some(inner) = self.inner.as_mut() else { return; };
+        let Some(inner) = self.inner.as_mut() else {
+            return;
+        };
 
         inner.update();
 

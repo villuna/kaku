@@ -1,3 +1,8 @@
+//! Types for creating and configuring drawable text objects.
+//!
+//! The main type here is [Text], which can be created using [TextRenderer::create_text]. This is a
+//! piece of text which can be drawn to the screen with a variety of effects.
+
 use wgpu::util::DeviceExt;
 
 use crate::{FontId, TextRenderer};
@@ -20,7 +25,12 @@ pub struct TextData {
 
 impl TextData {
     /// Creates a new [TextData] struct.
-    pub fn new<T: Into<String>>(text: T, position: [f32; 2], font: FontId, options: TextOptions) -> Self {
+    pub fn new<T: Into<String>>(
+        text: T,
+        position: [f32; 2],
+        font: FontId,
+        options: TextOptions,
+    ) -> Self {
         Self {
             text: text.into(),
             position,
@@ -28,7 +38,7 @@ impl TextData {
             options,
         }
     }
-    
+
     fn settings_uniform(&self) -> SettingsUniform {
         SettingsUniform {
             colour: self.options.colour,
@@ -53,7 +63,12 @@ pub struct Text {
 impl Text {
     /// Creates a new [Text] object and uploads all necessary data to the GPU.
     /// See also [TextRenderer::create_text] for a convenient wrapper to this function
-    pub fn new(data: TextData, device: &wgpu::Device, queue: &wgpu::Queue, text_renderer: &TextRenderer) -> Self {
+    pub fn new(
+        data: TextData,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        text_renderer: &TextRenderer,
+    ) -> Self {
         text_renderer.update_char_textures(&data.text, data.font, device, queue);
         let instance_buffer = text_renderer.create_buffer_for_text(&data, device);
         let text_settings = data.settings_uniform();
@@ -66,12 +81,10 @@ impl Text {
         let settings_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("kaku text settings uniform bind group"),
             layout: &text_renderer.settings_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: settings_buffer.as_entire_binding(),
-                }
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: settings_buffer.as_entire_binding(),
+            }],
         });
 
         Self {

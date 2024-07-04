@@ -2,6 +2,7 @@
 name = "kaku"
 version = "0.1.0"
 edition = "2021"
+authors = ["Luna Borella <ulfrthewolf at gmail dot com>"]
 
 [dependencies]
 ab_glyph = "0.2.26"
@@ -11,6 +12,7 @@ itertools = "0.13.0"
 wgpu = "0.20.1"
 log = "0.4.21"
 bytemuck = { version = "1.16.1", features = ["derive"] }
+rayon = "1.10.0"
 
 [dev-dependencies]
 winit = { version = "0.30.3", features = ["rwh_05"] }

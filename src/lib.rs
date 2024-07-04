@@ -1,15 +1,22 @@
 #![warn(missing_docs)]
 //! A font rendering crate for rendering text using signed distance fields.
 //!
-//! This crate was designed for a video game where I needed a lot of quick text rendering with
-//! outlines, so this is the main aim of this crate.
+//! This crate aims to provide a general and easy to use API for rendering text using [wgpu], mainly
+//! targeting video games. It can render text normally (using raster images), or with signed
+//! distance fields, which allow for performant scaling and effects such as outlines, glows and
+//! shadows.
 //!
-//! A lot of the functionality of this crate was taken from
-//! https://learnopengl.com/In-Practice/Text-Rendering.
-//!
-//! Also, I used the learn wpgu tutorial for reference for the wpgu code.
+//! I used [the learn wgpu tutorial](https://sotrh.github.io/learn-wgpu/) as reference for a lot of
+//! the wgpu code in this crate (particularly examples).
 
-use std::{cell::RefCell, num::NonZeroU64};
+mod sdf;
+pub mod text;
+
+use rayon::iter::{IntoParallelIterator, ParallelExtend, ParallelIterator};
+use text::{Text, TextData};
+
+use std::num::NonZeroU64;
+use std::sync::RwLock;
 
 pub use ab_glyph;
 use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
@@ -19,16 +26,10 @@ use log::info;
 use text::SettingsUniform;
 use wgpu::{include_wgsl, util::DeviceExt, TextureViewDescriptor};
 
-pub use text::{Text, TextData, TextOptions};
-
-mod sdf;
-mod text;
-
 type HashMap<K, V> = AHashMap<K, V>;
 
 #[derive(Debug)]
 struct CharTexture {
-    view: wgpu::TextureView,
     bind_group: &'static wgpu::BindGroup,
     position: [f32; 2],
     size: [f32; 2],
@@ -52,15 +53,21 @@ type CharacterCache = HashMap<char, Character>;
 #[derive(Debug, Eq, PartialEq, Hash, Clone, Copy)]
 pub struct FontId(usize);
 
+/// Settings for how the signed distance field calculation should work for this font.
 #[derive(Debug, Clone, Copy)]
 pub struct SdfSettings {
-    radius: f32,
+    /// The sdf spread radius.
+    ///
+    /// This field defines the length of the distance field in pixels. This imposes a limit on the
+    /// size of effects such as outlines, glow, shadows etc. A higher radius means you can create
+    /// larger outlines, but will use more memory on the GPU.
+    pub radius: f32,
 }
 
 struct FontData {
     font: FontArc,
     scale: PxScale,
-    char_cache: RefCell<CharacterCache>,
+    char_cache: RwLock<CharacterCache>,
     sdf_settings: Option<SdfSettings>,
 }
 
@@ -102,7 +109,8 @@ impl FontMap {
     fn load_with_sdf(&mut self, font: FontArc, size: f32, sdf_settings: SdfSettings) -> FontId {
         let id = self.fonts.len();
         let scale = font.pt_to_px_scale(size).unwrap();
-        self.fonts.push(FontData::new_with_sdf(font, scale, sdf_settings));
+        self.fonts
+            .push(FontData::new_with_sdf(font, scale, sdf_settings));
         FontId(id)
     }
 
@@ -119,23 +127,24 @@ struct ScreenUniform {
     projection: [[f32; 4]; 4],
 }
 
-/// A matrix that turns pixel coordinates into wgpu screen coordinates.
-fn create_screen_matrix(size: (u32, u32)) -> ScreenUniform {
-    let width = size.0 as f32;
-    let height = size.1 as f32;
-    let sx = 2.0 / width;
-    let sy = -2.0 / height;
+impl ScreenUniform {
+    fn new(target_size: (u32, u32)) -> Self {
+        let width = target_size.0 as f32;
+        let height = target_size.1 as f32;
+        let sx = 2.0 / width;
+        let sy = -2.0 / height;
 
-    // Note that wgsl constructs matrices by *row*, not by column
-    // which means this is the transpose of what it should be
-    // i found that out the hard way
-    ScreenUniform {
-        projection: [
-            [sx, 0.0, 0.0, 0.0],
-            [0.0, sy, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0],
-            [-1.0, 1.0, 0.0, 1.0],
-        ],
+        // Note that wgsl constructs matrices by *row*, not by column
+        // which means this is the transpose of what it should be
+        // i found that out the hard way
+        ScreenUniform {
+            projection: [
+                [sx, 0.0, 0.0, 0.0],
+                [0.0, sy, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [-1.0, 1.0, 0.0, 1.0],
+            ],
+        }
     }
 }
 
@@ -203,7 +212,6 @@ pub struct TextRenderer {
 
     screen_bind_group: wgpu::BindGroup,
     screen_buffer: wgpu::Buffer,
-    screen_uniform: ScreenUniform,
 
     pub(crate) settings_bind_group_layout: wgpu::BindGroupLayout,
 
@@ -257,7 +265,7 @@ impl TextRenderer {
                 ]
             });
 
-        let screen_uniform = create_screen_matrix((target_config.width, target_config.height));
+        let screen_uniform = ScreenUniform::new((target_config.width, target_config.height));
 
         // hey british guy, what's the wgpu function to create a buffer with no data?
         // "why it's device.create_buffer init"
@@ -353,17 +361,44 @@ impl TextRenderer {
             pipeline,
             screen_bind_group,
             screen_buffer,
-            screen_uniform,
             vertex_buffer,
         }
     }
 
+    /// Configure the text renderer to draw to a surface with the given dimensions.
+    ///
+    /// You want to use this when the window resizes. You might also want to use it before drawing
+    /// to a texture which is smaller than the screen, if you so choose.
+    pub fn resize(&self, new_size: (u32, u32), queue: &wgpu::Queue) {
+        let screen_uniform = ScreenUniform::new(new_size);
+        queue.write_buffer(
+            &self.screen_buffer,
+            0,
+            bytemuck::cast_slice(&[screen_uniform]),
+        );
+    }
+
     /// Loads a font for use in the text renderer
-    pub fn load_font<F: Font>(&mut self, font: F, size: f32) -> FontId
+    pub fn load_font<F>(&mut self, font: F, size: f32) -> FontId
     where
         F: Font + Send + Sync + 'static,
     {
         self.fonts.load(FontArc::new(font), size)
+    }
+
+    /// Loads a font for use in the text renderer with sdf rendering.
+    ///
+    /// There are no requirements on the font, any font can be used for sdf rendering. A font with
+    /// SDF enabled can be scaled up without pixellation, and can have effects applied to it.
+    /// However, creating the textures for each character will take longer and the textures will
+    /// take up more space on the GPU. So if you don't need any of these effects, use
+    /// [TextRenderer::load_font] instead.
+    pub fn load_font_with_sdf<F>(&mut self, font: F, size: f32, sdf_settings: SdfSettings) -> FontId
+    where
+        F: Font + Send + Sync + 'static,
+    {
+        self.fonts
+            .load_with_sdf(FontArc::new(font), size, sdf_settings)
     }
 
     /// Creates a new [Text] object, and creates all gpu buffers needed for it
@@ -377,7 +412,30 @@ impl TextRenderer {
         render_pass: &mut wgpu::RenderPass<'pass>,
         text: &'pass Text,
     ) {
-        let char_cache = self.fonts.get(text.data.font).char_cache.borrow();
+        let font_data = self.fonts.get(text.data.font);
+        match font_data.sdf_settings.as_ref() {
+            Some(settings) => self.draw_text_sdf(render_pass, text, font_data, settings),
+            None => self.draw_text_no_sdf(render_pass, text, font_data),
+        }
+    }
+
+    fn draw_text_sdf<'pass>(
+        &'pass self,
+        render_pass: &mut wgpu::RenderPass<'pass>,
+        text: &'pass Text,
+        font_data: &FontData,
+        sdf_settings: &SdfSettings,
+    ) {
+        todo!()
+    }
+
+    fn draw_text_no_sdf<'pass>(
+        &'pass self,
+        render_pass: &mut wgpu::RenderPass<'pass>,
+        text: &'pass Text,
+        font_data: &FontData,
+    ) {
+        let char_cache = font_data.char_cache.read().unwrap();
 
         render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
@@ -391,38 +449,17 @@ impl TextRenderer {
             let char_data = char_cache.get(&c).unwrap();
 
             if let Some(texture) = &char_data.texture {
-                render_pass.set_bind_group(1, &texture.bind_group, &[]);
+                render_pass.set_bind_group(1, texture.bind_group, &[]);
                 render_pass.draw(0..4, i as u32..i as u32 + 1);
                 i += 1;
             }
         }
     }
 
-    /// Creates and caches the character textures necessary to draw a certain string with a given
-    /// font.
-    fn update_char_textures(
-        &self,
-        text: &str,
-        font: FontId,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) {
-        let cache = self.fonts.get(font);
-        let new_characters = text
-            .chars()
-            .filter(|c| !cache.char_cache.borrow().contains_key(c))
-            .unique()
-            .collect_vec();
-
-        for c in new_characters {
-            self.create_char_texture(c, font, device, queue);
-        }
-    }
-
     /// Creates an instance buffer for a given piece of text
     fn create_buffer_for_text(&self, text: &TextData, device: &wgpu::Device) -> wgpu::Buffer {
         let mut position = text.position;
-        let char_cache = self.fonts.get(text.font).char_cache.borrow();
+        let char_cache = self.fonts.get(text.font).char_cache.read().unwrap();
         let scale = text.options.scale;
 
         let instances: Vec<CharacterInstance> = text
@@ -435,15 +472,13 @@ impl TextRenderer {
                     let x = position[0] + texture.position[0] * scale;
                     let y = position[1] + texture.position[1] * scale;
 
-                    let w = texture.size[0] as f32 * scale;
-                    let h = texture.size[1] as f32 * scale;
+                    let w = texture.size[0] * scale;
+                    let h = texture.size[1] * scale;
 
-                    let res = CharacterInstance {
+                    CharacterInstance {
                         position: [x, y],
                         size: [w, h],
-                    };
-
-                    res
+                    }
                 });
 
                 position[0] += char_data.advance * scale;
@@ -460,27 +495,60 @@ impl TextRenderer {
         instance_buffer
     }
 
-    fn create_char_texture(
+    /// Creates and caches the character textures necessary to draw a certain string with a given
+    /// font.
+    ///
+    /// This is called every time a new [Text] is created, but you might also want to call
+    /// it yourself if you know you're going to be displaying some text in the future and want to
+    /// generate the character textures in advance.
+    ///
+    /// For example, if you are making a game with a score display that might change every frame,
+    /// you might want to cache all the characters from '0' to '9' beforehand to save this from
+    /// happening between frames.
+    pub fn update_char_textures(
         &self,
-        c: char,
-        font_id: FontId,
+        text: &str,
+        font: FontId,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) {
-        info!("Creating character texture for {c}");
-        let font = self.fonts.get(font_id);
-        // Calculate metrics
-        let scaled = font.font.as_scaled(font.scale);
-        let glyph = font.font.glyph_id(c).with_scale(font.scale);
+        let now = std::time::Instant::now();
+        let font_data = self.fonts.get(font);
+        let mut char_cache = font_data.char_cache.write().unwrap();
+        let new_characters = text
+            .chars()
+            .filter(|c| !char_cache.contains_key(c))
+            .unique()
+            .collect_vec();
 
-        let bearing = [
-            scaled.h_side_bearing(glyph.id),
-            scaled.v_side_bearing(glyph.id),
-        ];
+        let font = &font_data.font;
+        let scale = font_data.scale;
+
+        let char_data = new_characters
+            .into_par_iter()
+            .map(|c| (c, self.create_char_texture(c, font, scale, device, queue)));
+
+        char_cache.par_extend(char_data);
+
+        println!("cached in {}us", now.elapsed().as_micros());
+    }
+
+    fn create_char_texture(
+        &self,
+        c: char,
+        font: &FontArc,
+        scale: PxScale,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Character {
+        info!("Creating character texture for {c}");
+        // Calculate metrics
+        let scaled = font.as_scaled(scale);
+        let glyph = font.glyph_id(c).with_scale(scale);
+
         let advance = scaled.h_advance(glyph.id);
 
         let texture = scaled.outline_glyph(glyph).map(|outlined| {
-            // TODO: This is a rect, not just a width and height. use this to draw the pixels at the right positions.
             let px_bounds = outlined.px_bounds();
             let width = px_bounds.width().ceil() as u32;
             let height = px_bounds.height().ceil() as u32;
@@ -553,7 +621,6 @@ impl TextRenderer {
             });
 
             CharTexture {
-                view,
                 // TODO: Get rid of this
                 // this is a hack to get past the render pass lifetime restriction until the wgpu
                 // update that will get rid of it
@@ -569,13 +636,7 @@ impl TextRenderer {
             }
         });
 
-        let char_data = Character { texture, advance };
-
-        self.fonts
-            .get(font_id)
-            .char_cache
-            .borrow_mut()
-            .insert(c, char_data);
+        Character { texture, advance }
     }
 }
 

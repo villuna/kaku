@@ -23,28 +23,32 @@ impl Renderer {
 
             let surface = instance.create_surface(window.clone()).unwrap();
 
-            let adapter = instance.request_adapter(
-                &wgpu::RequestAdapterOptions {
+            let adapter = instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
                     power_preference: wgpu::PowerPreference::default(),
                     compatible_surface: Some(&surface),
                     force_fallback_adapter: false,
-                },
-            ).await.unwrap();
+                })
+                .await
+                .unwrap();
 
-            let (device, queue) = adapter.request_device(
-                &wgpu::DeviceDescriptor {
-                    required_features: wgpu::Features::empty(),
-                    // WebGL doesn't support all of wgpu's features, so if
-                    // we're building for the web, we'll have to disable some.
-                   required_limits: if cfg!(target_arch = "wasm32") {
-                        wgpu::Limits::downlevel_webgl2_defaults()
-                    } else {
-                        wgpu::Limits::default()
+            let (device, queue) = adapter
+                .request_device(
+                    &wgpu::DeviceDescriptor {
+                        required_features: wgpu::Features::empty(),
+                        // WebGL doesn't support all of wgpu's features, so if
+                        // we're building for the web, we'll have to disable some.
+                        required_limits: if cfg!(target_arch = "wasm32") {
+                            wgpu::Limits::downlevel_webgl2_defaults()
+                        } else {
+                            wgpu::Limits::default()
+                        },
+                        label: None,
                     },
-                    label: None,
-                },
-                None, // Trace path
-            ).await.unwrap();
+                    None, // Trace path
+                )
+                .await
+                .unwrap();
 
             let surface_caps = surface.get_capabilities(&adapter);
             let surface_format = surface_caps.formats[0];
@@ -53,7 +57,7 @@ impl Renderer {
                 format: surface_format,
                 width: size.width,
                 height: size.height,
-                present_mode: surface_caps.present_modes[0],
+                present_mode: wgpu::PresentMode::AutoNoVsync,
                 alpha_mode: surface_caps.alpha_modes[0],
                 view_formats: vec![],
                 desired_maximum_frame_latency: 2,
