@@ -13,6 +13,8 @@ wgpu = "0.20.1"
 log = "0.4.21"
 bytemuck = { version = "1.16.1", features = ["derive"] }
 rayon = "1.10.0"
+priority-queue = "2.0.3"
+ordered-float = "4.2.1"
 
 [dev-dependencies]
 winit = { version = "0.30.3", features = ["rwh_05"] }

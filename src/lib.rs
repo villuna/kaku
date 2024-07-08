@@ -23,10 +23,13 @@ use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
 use ahash::AHashMap;
 use itertools::Itertools;
 use log::info;
-use text::SettingsUniform;
+use sdf::create_sdf_texture;
+use text::{SdfSettingsUniform, SettingsUniform};
 use wgpu::{include_wgsl, util::DeviceExt, TextureViewDescriptor};
 
 type HashMap<K, V> = AHashMap<K, V>;
+
+pub use sdf::SdfSettings;
 
 #[derive(Debug)]
 struct CharTexture {
@@ -52,17 +55,6 @@ type CharacterCache = HashMap<char, Character>;
 /// back one of these IDs referencing that font.
 #[derive(Debug, Eq, PartialEq, Hash, Clone, Copy)]
 pub struct FontId(usize);
-
-/// Settings for how the signed distance field calculation should work for this font.
-#[derive(Debug, Clone, Copy)]
-pub struct SdfSettings {
-    /// The sdf spread radius.
-    ///
-    /// This field defines the length of the distance field in pixels. This imposes a limit on the
-    /// size of effects such as outlines, glow, shadows etc. A higher radius means you can create
-    /// larger outlines, but will use more memory on the GPU.
-    pub radius: f32,
-}
 
 struct FontData {
     font: FontArc,
@@ -213,11 +205,13 @@ pub struct TextRenderer {
     screen_bind_group: wgpu::BindGroup,
     screen_buffer: wgpu::Buffer,
 
-    pub(crate) settings_bind_group_layout: wgpu::BindGroupLayout,
+    pub(crate) settings_layout: wgpu::BindGroupLayout,
+    pub(crate) sdf_settings_layout: wgpu::BindGroupLayout,
 
     vertex_buffer: wgpu::Buffer,
 
-    pipeline: wgpu::RenderPipeline,
+    basic_pipeline: wgpu::RenderPipeline,
+    sdf_pipeline: wgpu::RenderPipeline,
 }
 
 impl TextRenderer {
@@ -286,9 +280,23 @@ impl TextRenderer {
 
         // The settings bind group for a piece of text details how it should be drawn in the
         // fragment stage
-        let settings_bind_group_layout =
+        let settings_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("kaku text settings uniform bind group layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: NonZeroU64::new(std::mem::size_of::<SettingsUniform>() as _),
+                },
+                count: None,
+            }],
+        });
+
+        let sdf_settings_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("kaku text settings uniform bind group layout"),
+                label: Some("kaku sdf text settings uniform bind group layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -296,37 +304,83 @@ impl TextRenderer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         min_binding_size: NonZeroU64::new(
-                            std::mem::size_of::<SettingsUniform>() as _
+                            std::mem::size_of::<SdfSettingsUniform>() as _,
                         ),
                     },
                     count: None,
                 }],
             });
 
-        // The render pipeline to use to render the text
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("kaku text rendering pipeline layout"),
-            bind_group_layouts: &[
-                &screen_bind_group_layout,
-                &char_bind_group_layout,
-                &settings_bind_group_layout,
-            ],
-            push_constant_ranges: &[],
-        });
+        // The render pipeline to use to render the text with no sdf
+        let basic_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("kaku text rendering pipeline layout"),
+                bind_group_layouts: &[
+                    &screen_bind_group_layout,
+                    &char_bind_group_layout,
+                    &settings_layout,
+                ],
+                push_constant_ranges: &[],
+            });
 
-        let shader = device.create_shader_module(include_wgsl!("text_shader.wgsl"));
+        let basic_shader = device.create_shader_module(include_wgsl!("shaders/text_shader.wgsl"));
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let basic_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("kaku text rendering pipeline"),
-            layout: Some(&pipeline_layout),
+            layout: Some(&basic_pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &basic_shader,
                 entry_point: "vs_main",
                 buffers: &[texture_vertex_layout(), character_instance_layout()],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &basic_shader,
+                entry_point: "fs_main",
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+        });
+
+        // The render pipeline to use to render the text with no sdf
+        let sdf_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("kaku sdf text rendering pipeline layout"),
+            bind_group_layouts: &[
+                &screen_bind_group_layout,
+                &char_bind_group_layout,
+                &sdf_settings_layout,
+            ],
+            push_constant_ranges: &[],
+        });
+
+        let sdf_shader = device.create_shader_module(include_wgsl!("shaders/sdf_text_shader.wgsl"));
+
+        let sdf_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("kaku sdf text rendering pipeline"),
+            layout: Some(&sdf_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &sdf_shader,
+                entry_point: "vs_main",
+                buffers: &[texture_vertex_layout(), character_instance_layout()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &sdf_shader,
                 entry_point: "fs_main",
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
@@ -357,11 +411,13 @@ impl TextRenderer {
         Self {
             fonts: Default::default(),
             char_bind_group_layout,
-            settings_bind_group_layout,
-            pipeline,
+            settings_layout,
+            basic_pipeline,
             screen_bind_group,
             screen_buffer,
             vertex_buffer,
+            sdf_settings_layout,
+            sdf_pipeline,
         }
     }
 
@@ -412,32 +468,16 @@ impl TextRenderer {
         render_pass: &mut wgpu::RenderPass<'pass>,
         text: &'pass Text,
     ) {
+        // Set the pipeline depending on if the font uses sdf
         let font_data = self.fonts.get(text.data.font);
-        match font_data.sdf_settings.as_ref() {
-            Some(settings) => self.draw_text_sdf(render_pass, text, font_data, settings),
-            None => self.draw_text_no_sdf(render_pass, text, font_data),
+        if font_data.sdf_settings.is_some() {
+            render_pass.set_pipeline(&self.sdf_pipeline);
+        } else {
+            render_pass.set_pipeline(&self.basic_pipeline);
         }
-    }
 
-    fn draw_text_sdf<'pass>(
-        &'pass self,
-        render_pass: &mut wgpu::RenderPass<'pass>,
-        text: &'pass Text,
-        font_data: &FontData,
-        sdf_settings: &SdfSettings,
-    ) {
-        todo!()
-    }
-
-    fn draw_text_no_sdf<'pass>(
-        &'pass self,
-        render_pass: &mut wgpu::RenderPass<'pass>,
-        text: &'pass Text,
-        font_data: &FontData,
-    ) {
         let char_cache = font_data.char_cache.read().unwrap();
 
-        render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
         render_pass.set_bind_group(2, &text.settings_bind_group, &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
@@ -454,6 +494,11 @@ impl TextRenderer {
                 i += 1;
             }
         }
+    }
+
+    /// Returns whether a given font was loaded with sdf enabled
+    pub fn font_uses_sdf(&self, font: FontId) -> bool {
+        self.fonts.get(font).sdf_settings.is_some()
     }
 
     /// Creates an instance buffer for a given piece of text
@@ -512,7 +557,6 @@ impl TextRenderer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) {
-        let now = std::time::Instant::now();
         let font_data = self.fonts.get(font);
         let mut char_cache = font_data.char_cache.write().unwrap();
         let new_characters = text
@@ -523,14 +567,130 @@ impl TextRenderer {
 
         let font = &font_data.font;
         let scale = font_data.scale;
+        let sdf = font_data.sdf_settings.as_ref();
 
-        let char_data = new_characters
-            .into_par_iter()
-            .map(|c| (c, self.create_char_texture(c, font, scale, device, queue)));
+        let char_data = new_characters.into_par_iter().map(|c| {
+            let data = match sdf {
+                None => self.create_char_texture(c, font, scale, device, queue),
+                Some(sdf) => self.create_char_texture_sdf(c, font, scale, sdf, device, queue),
+            };
+            (c, data)
+        });
 
         char_cache.par_extend(char_data);
+    }
 
-        println!("cached in {}us", now.elapsed().as_micros());
+    fn create_char_texture_sdf(
+        &self,
+        c: char,
+        font: &FontArc,
+        scale: PxScale,
+        sdf: &SdfSettings,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Character {
+        info!("Creating sdf character texture for {c}");
+        // Calculate metrics
+        let scaled = font.as_scaled(scale);
+        let glyph = font.glyph_id(c).with_scale(scale);
+
+        let advance = scaled.h_advance(glyph.id);
+
+        let texture = scaled.outline_glyph(glyph).map(|outlined| {
+            let px_bounds = outlined.px_bounds();
+            let mut width = px_bounds.width().ceil() as u32;
+            let mut height = px_bounds.height().ceil() as u32;
+            let mut x = px_bounds.min.x;
+            let mut y = px_bounds.min.y;
+
+            let mut image = image::GrayImage::new(width, height);
+            outlined.draw(|x, y, val| image.put_pixel(x, y, image::Luma([(val * 255.) as u8])));
+
+            let (sdf_image, padding) = create_sdf_texture(&image, (width, height), sdf);
+
+            image = sdf_image;
+            width += 2 * padding;
+            height += 2 * padding;
+            x -= padding as f32;
+            y -= padding as f32;
+
+            let texture_size = wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            };
+
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(&format!("kaku texture for character: '{c}'")),
+                size: texture_size,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+                mip_level_count: 1,
+                // TODO: multisampling
+                sample_count: 1,
+            });
+
+            let view = texture.create_view(&TextureViewDescriptor {
+                label: Some(&format!("kaku texture view for character: '{c}'")),
+                ..Default::default()
+            });
+
+            queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &image,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width),
+                    rows_per_image: Some(height),
+                },
+                texture_size,
+            );
+
+            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            });
+
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(&format!("kaku bind group for character '{c}'")),
+                layout: &self.char_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                ],
+            });
+
+            CharTexture {
+                // TODO: Get rid of this
+                // this is a hack to get past the render pass lifetime restriction until the wgpu
+                // update that will get rid of it
+                //
+                // For now, this is all I need since I will never be deleting textures from the
+                // cache and will never be dropping the texture cache (in the game this crate was
+                // originally made for)
+                //
+                // but, it will have to be removed eventually
+                bind_group: Box::leak(Box::new(bind_group)),
+                size: [width as f32, height as f32],
+                position: [x, y],
+            }
+        });
+
+        Character { texture, advance }
     }
 
     fn create_char_texture(
@@ -555,9 +715,7 @@ impl TextRenderer {
             let x = px_bounds.min.x;
             let y = px_bounds.min.y;
 
-            // Create the image and write the glyph data to it
             let mut image = image::GrayImage::new(width, height);
-
             outlined.draw(|x, y, val| image.put_pixel(x, y, image::Luma([(val * 255.) as u8])));
 
             let texture_size = wgpu::Extent3d {
@@ -600,7 +758,7 @@ impl TextRenderer {
             );
 
             let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                mag_filter: wgpu::FilterMode::Nearest,
+                mag_filter: wgpu::FilterMode::Linear,
                 min_filter: wgpu::FilterMode::Linear,
                 ..Default::default()
             });
@@ -639,6 +797,3 @@ impl TextRenderer {
         Character { texture, advance }
     }
 }
-
-#[cfg(test)]
-mod tests {}

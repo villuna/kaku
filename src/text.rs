@@ -5,7 +5,7 @@
 
 use wgpu::util::DeviceExt;
 
-use crate::{FontId, TextRenderer};
+use crate::{FontId, FontMap, TextRenderer};
 
 /// Data describing a text object.
 #[derive(Debug, Clone)]
@@ -44,12 +44,40 @@ impl TextData {
             colour: self.options.colour,
         }
     }
+
+    fn sdf_settings_uniform(&self, fonts: &FontMap) -> SdfSettingsUniform {
+        let sdf_radius = fonts
+            .get(self.font)
+            .sdf_settings
+            .map(|s| s.radius)
+            .unwrap_or_default();
+
+        SdfSettingsUniform {
+            colour: self.options.colour,
+            outline_colour: self.options.outline.map(|o| o.colour).unwrap_or([0.0; 4]),
+            outline_radius: self.options.outline.map(|o| o.width).unwrap_or(0.),
+            sdf_radius,
+            image_scale: self.options.scale,
+            _padding: 0.,
+        }
+    }
 }
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct SettingsUniform {
     colour: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct SdfSettingsUniform {
+    pub(crate) colour: [f32; 4],
+    pub(crate) outline_colour: [f32; 4],
+    pub(crate) outline_radius: f32,
+    pub(crate) sdf_radius: f32,
+    pub(crate) image_scale: f32,
+    _padding: f32,
 }
 
 /// A piece of text that can be rendered to the screen.
@@ -71,21 +99,41 @@ impl Text {
     ) -> Self {
         text_renderer.update_char_textures(&data.text, data.font, device, queue);
         let instance_buffer = text_renderer.create_buffer_for_text(&data, device);
-        let text_settings = data.settings_uniform();
-        let settings_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("kaku text settings uniform buffer"),
-            contents: bytemuck::cast_slice(&[text_settings]),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
-        });
 
-        let settings_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("kaku text settings uniform bind group"),
-            layout: &text_renderer.settings_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: settings_buffer.as_entire_binding(),
-            }],
-        });
+        let settings_bind_group = if text_renderer.font_uses_sdf(data.font) {
+            let text_settings = data.sdf_settings_uniform(&text_renderer.fonts);
+            let settings_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("kaku sdf text settings uniform buffer"),
+                contents: bytemuck::cast_slice(&[text_settings]),
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
+            });
+
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("kaku sdf text settings uniform bind group"),
+                layout: &text_renderer.sdf_settings_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: settings_buffer.as_entire_binding(),
+                }],
+            })
+        } else {
+            let text_settings = data.settings_uniform();
+
+            let settings_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("kaku text settings uniform buffer"),
+                contents: bytemuck::cast_slice(&[text_settings]),
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
+            });
+
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("kaku text settings uniform bind group"),
+                layout: &text_renderer.settings_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: settings_buffer.as_entire_binding(),
+                }],
+            })
+        };
 
         Self {
             data,

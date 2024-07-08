@@ -1,7 +1,7 @@
 mod wgpu_renderer;
 use std::{sync::Arc, time::Instant};
 
-use ab_glyph::FontRef;
+use ab_glyph::{FontArc, FontRef};
 use wgpu::SurfaceError;
 use wgpu_renderer::Renderer;
 use winit::{
@@ -15,7 +15,7 @@ use winit::{
 
 use kaku::{
     text::{Text, TextData, TextOptions},
-    FontId, TextRenderer,
+    FontId, SdfSettings, TextRenderer,
 };
 
 const FPS_POLL_TIME_LIMIT: f32 = 0.5;
@@ -24,8 +24,9 @@ struct BasicTextAppInner {
     renderer: Renderer,
     text_renderer: TextRenderer,
     hello_world: Text,
+    hello_world_sdf: Text,
+    hello_world_sdf_scaled: Text,
     fira_sans: FontId,
-    jp_text: Text,
     fps_text: Text,
     frame_count: f32,
     fps_poll_start: Instant,
@@ -40,17 +41,17 @@ impl BasicTextAppInner {
     fn new(window: Arc<Window>) -> Self {
         let renderer = Renderer::new(window);
         let mut text_renderer = TextRenderer::new(&renderer.device, &renderer.config);
-        let noto_sans =
-            FontRef::try_from_slice(include_bytes!("../fonts/NotoSansJP-Regular.ttf")).unwrap();
-        let fira_sans =
-            FontRef::try_from_slice(include_bytes!("../fonts/FiraSans-Regular.ttf")).unwrap();
-        let noto_sans = text_renderer.load_font(noto_sans, 20.);
-        let fira_sans = text_renderer.load_font(fira_sans, 48.);
+        let fira_sans = FontArc::new(
+            FontRef::try_from_slice(include_bytes!("../fonts/FiraSans-Regular.ttf")).unwrap(),
+        );
+        let fira_sans_sdf =
+            text_renderer.load_font_with_sdf(fira_sans.clone(), 60., SdfSettings { radius: 20.0 });
+        let fira_sans = text_renderer.load_font(fira_sans, 60.);
 
         let hello_world = text_renderer.create_text(
             TextData::new(
                 "hello, world! glyph :3",
-                [100., 100.],
+                [50., 200.],
                 fira_sans,
                 Default::default(),
             ),
@@ -58,13 +59,24 @@ impl BasicTextAppInner {
             &renderer.queue,
         );
 
-        let jp_text = text_renderer.create_text(
+        let hello_world_sdf = text_renderer.create_text(
             TextData::new(
-                "世界が始まるよ！",
-                [100., 400.],
-                noto_sans,
+                "hello, world! glyph :3",
+                [50., 300.],
+                fira_sans_sdf,
+                TextOptions::default(),
+            ),
+            &renderer.device,
+            &renderer.queue,
+        );
+
+        let hello_world_sdf_scaled = text_renderer.create_text(
+            TextData::new(
+                "hello, world! glyph :3",
+                [50., 500.],
+                fira_sans_sdf,
                 TextOptions {
-                    colour: [0.5, 0.1, 0.6, 1.],
+                    scale: 2.0,
                     ..Default::default()
                 },
             ),
@@ -75,7 +87,7 @@ impl BasicTextAppInner {
         let fps_text = text_renderer.create_text(
             TextData::new(
                 "fps: ",
-                [20., 20.],
+                [40., 40.],
                 fira_sans,
                 TextOptions {
                     colour: [1., 0., 1., 1.],
@@ -91,8 +103,9 @@ impl BasicTextAppInner {
             text_renderer,
             renderer,
             hello_world,
+            hello_world_sdf,
+            hello_world_sdf_scaled,
             fira_sans,
-            jp_text,
             fps_text,
             fps_poll_start: Instant::now(),
             frame_count: 0.,
@@ -109,7 +122,7 @@ impl BasicTextAppInner {
             self.fps_text = self.text_renderer.create_text(
                 TextData::new(
                     format!("fps: {fps:.2}"),
-                    [20., 20.],
+                    [40., 40.],
                     self.fira_sans,
                     TextOptions {
                         colour: [1., 0., 1., 1.],
@@ -163,9 +176,11 @@ impl BasicTextAppInner {
         self.text_renderer
             .draw_text(&mut render_pass, &self.hello_world);
         self.text_renderer
-            .draw_text(&mut render_pass, &self.jp_text);
+            .draw_text(&mut render_pass, &self.hello_world_sdf);
         self.text_renderer
             .draw_text(&mut render_pass, &self.fps_text);
+        self.text_renderer
+            .draw_text(&mut render_pass, &self.hello_world_sdf_scaled);
 
         drop(render_pass);
 
