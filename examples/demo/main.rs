@@ -6,6 +6,7 @@ use wgpu::SurfaceError;
 use wgpu_renderer::Renderer;
 use winit::{
     application::ApplicationHandler,
+    dpi::PhysicalSize,
     error::EventLoopError,
     event::{ElementState, KeyEvent, WindowEvent},
     event_loop::EventLoop,
@@ -14,7 +15,7 @@ use winit::{
 };
 
 use kaku::{
-    text::{Text, TextData, TextOptions},
+    text::{Outline, Text, TextData, TextOptions},
     FontId, SdfSettings, TextRenderer,
 };
 
@@ -25,8 +26,9 @@ struct BasicTextAppInner {
     text_renderer: TextRenderer,
     hello_world: Text,
     hello_world_sdf: Text,
-    hello_world_sdf_scaled: Text,
-    fira_sans: FontId,
+    hello_world_outline: Text,
+    hello_world_scaled: Text,
+    fira_sans_sdf: FontId,
     fps_text: Text,
     frame_count: f32,
     fps_poll_start: Instant,
@@ -51,7 +53,7 @@ impl BasicTextAppInner {
         let hello_world = text_renderer.create_text(
             TextData::new(
                 "hello, world! glyph :3",
-                [50., 200.],
+                [50., 120.],
                 fira_sans,
                 Default::default(),
             ),
@@ -62,18 +64,36 @@ impl BasicTextAppInner {
         let hello_world_sdf = text_renderer.create_text(
             TextData::new(
                 "hello, world! glyph :3",
-                [50., 300.],
+                [50., 220.],
                 fira_sans_sdf,
-                TextOptions::default(),
+                Default::default(),
             ),
             &renderer.device,
             &renderer.queue,
         );
 
-        let hello_world_sdf_scaled = text_renderer.create_text(
+        let hello_world_outline = text_renderer.create_text(
             TextData::new(
                 "hello, world! glyph :3",
-                [50., 500.],
+                [50., 320.],
+                fira_sans_sdf,
+                TextOptions {
+                    colour: [1.; 4],
+                    outline: Some(kaku::text::Outline {
+                        colour: [1., 0., 0., 1.],
+                        width: 15.,
+                    }),
+                    ..Default::default()
+                },
+            ),
+            &renderer.device,
+            &renderer.queue,
+        );
+
+        let hello_world_scaled = text_renderer.create_text(
+            TextData::new(
+                "hello, world! glyph :3",
+                [50., 520.],
                 fira_sans_sdf,
                 TextOptions {
                     scale: 2.0,
@@ -88,11 +108,14 @@ impl BasicTextAppInner {
             TextData::new(
                 "fps: ",
                 [40., 40.],
-                fira_sans,
+                fira_sans_sdf,
                 TextOptions {
                     colour: [1., 0., 1., 1.],
                     scale: 0.3,
-                    ..Default::default()
+                    outline: Some(Outline {
+                        colour: [0., 0., 0., 1.],
+                        width: 2.,
+                    }),
                 },
             ),
             &renderer.device,
@@ -104,8 +127,9 @@ impl BasicTextAppInner {
             renderer,
             hello_world,
             hello_world_sdf,
-            hello_world_sdf_scaled,
-            fira_sans,
+            hello_world_outline,
+            hello_world_scaled,
+            fira_sans_sdf,
             fps_text,
             fps_poll_start: Instant::now(),
             frame_count: 0.,
@@ -123,11 +147,14 @@ impl BasicTextAppInner {
                 TextData::new(
                     format!("fps: {fps:.2}"),
                     [40., 40.],
-                    self.fira_sans,
+                    self.fira_sans_sdf,
                     TextOptions {
                         colour: [1., 0., 1., 1.],
                         scale: 0.3,
-                        ..Default::default()
+                        outline: Some(Outline {
+                            colour: [0., 0., 0., 1.],
+                            width: 3.,
+                        }),
                     },
                 ),
                 &self.renderer.device,
@@ -174,13 +201,15 @@ impl BasicTextAppInner {
 
         // Important code is here!
         self.text_renderer
+            .draw_text(&mut render_pass, &self.fps_text);
+        self.text_renderer
             .draw_text(&mut render_pass, &self.hello_world);
         self.text_renderer
             .draw_text(&mut render_pass, &self.hello_world_sdf);
         self.text_renderer
-            .draw_text(&mut render_pass, &self.fps_text);
+            .draw_text(&mut render_pass, &self.hello_world_outline);
         self.text_renderer
-            .draw_text(&mut render_pass, &self.hello_world_sdf_scaled);
+            .draw_text(&mut render_pass, &self.hello_world_scaled);
 
         drop(render_pass);
 
@@ -196,7 +225,10 @@ impl BasicTextAppInner {
 impl ApplicationHandler for BasicTextApp {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         if self.inner.is_none() {
-            let attributes = Window::default_attributes().with_title("basic text example");
+            let attributes = Window::default_attributes()
+                .with_title("basic text example")
+                .with_inner_size(PhysicalSize::new(1400, 600));
+
             let window = event_loop.create_window(attributes).unwrap();
             self.inner = Some(BasicTextAppInner::new(Arc::new(window)));
         }
@@ -228,6 +260,9 @@ impl ApplicationHandler for BasicTextApp {
 
                 WindowEvent::Resized(physical_size) => {
                     inner.renderer.resize(physical_size);
+                    inner
+                        .text_renderer
+                        .resize(physical_size.into(), &inner.renderer.queue);
                 }
 
                 _ => {}

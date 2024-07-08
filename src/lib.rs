@@ -12,6 +12,7 @@
 mod sdf;
 pub mod text;
 
+use image::GrayImage;
 use rayon::iter::{IntoParallelIterator, ParallelExtend, ParallelIterator};
 use text::{Text, TextData};
 
@@ -126,8 +127,8 @@ impl ScreenUniform {
         let sx = 2.0 / width;
         let sy = -2.0 / height;
 
-        // Note that wgsl constructs matrices by *row*, not by column
-        // which means this is the transpose of what it should be
+        // Note that wgsl matrices are *column-major*
+        // which means each sub-array is one column, not one row
         // i found that out the hard way
         ScreenUniform {
             projection: [
@@ -212,6 +213,7 @@ pub struct TextRenderer {
 
     basic_pipeline: wgpu::RenderPipeline,
     sdf_pipeline: wgpu::RenderPipeline,
+    outline_pipeline: wgpu::RenderPipeline,
 }
 
 impl TextRenderer {
@@ -402,6 +404,41 @@ impl TextRenderer {
             multiview: None,
         });
 
+        let outline_shader =
+            device.create_shader_module(include_wgsl!("shaders/sdf_outline_shader.wgsl"));
+
+        let outline_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("kaku sdf text rendering pipeline"),
+            layout: Some(&sdf_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &outline_shader,
+                entry_point: "vs_main",
+                buffers: &[texture_vertex_layout(), character_instance_layout()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &outline_shader,
+                entry_point: "fs_main",
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+        });
+
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("kaku character vertex buffer"),
             contents: bytemuck::cast_slice(&TEXTURE_VERTICES),
@@ -418,6 +455,7 @@ impl TextRenderer {
             vertex_buffer,
             sdf_settings_layout,
             sdf_pipeline,
+            outline_pipeline,
         }
     }
 
@@ -470,6 +508,9 @@ impl TextRenderer {
     ) {
         // Set the pipeline depending on if the font uses sdf
         let font_data = self.fonts.get(text.data.font);
+        let use_sdf = font_data.sdf_settings.is_some();
+        let use_outline = use_sdf && text.data.options.outline.is_some();
+
         if font_data.sdf_settings.is_some() {
             render_pass.set_pipeline(&self.sdf_pipeline);
         } else {
@@ -483,7 +524,23 @@ impl TextRenderer {
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.set_vertex_buffer(1, text.instance_buffer.slice(..));
 
-        // This could be an iterator but it would be like 3 lines longer and impossible to read
+        if use_outline {
+            render_pass.set_pipeline(&self.outline_pipeline);
+
+            let mut i = 0;
+            for c in text.data.text.chars() {
+                let char_data = char_cache.get(&c).unwrap();
+
+                if let Some(texture) = &char_data.texture {
+                    render_pass.set_bind_group(1, texture.bind_group, &[]);
+                    render_pass.draw(0..4, i as u32..i as u32 + 1);
+                    i += 1;
+                }
+            }
+
+            render_pass.set_pipeline(&self.sdf_pipeline);
+        }
+
         let mut i = 0;
         for c in text.data.text.chars() {
             let char_data = char_cache.get(&c).unwrap();
@@ -598,8 +655,8 @@ impl TextRenderer {
 
         let texture = scaled.outline_glyph(glyph).map(|outlined| {
             let px_bounds = outlined.px_bounds();
-            let mut width = px_bounds.width().ceil() as u32;
-            let mut height = px_bounds.height().ceil() as u32;
+            let width = px_bounds.width().ceil() as u32;
+            let height = px_bounds.height().ceil() as u32;
             let mut x = px_bounds.min.x;
             let mut y = px_bounds.min.y;
 
@@ -609,70 +666,10 @@ impl TextRenderer {
             let (sdf_image, padding) = create_sdf_texture(&image, (width, height), sdf);
 
             image = sdf_image;
-            width += 2 * padding;
-            height += 2 * padding;
             x -= padding as f32;
             y -= padding as f32;
 
-            let texture_size = wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            };
-
-            let texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some(&format!("kaku texture for character: '{c}'")),
-                size: texture_size,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R8Unorm,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-                mip_level_count: 1,
-                // TODO: multisampling
-                sample_count: 1,
-            });
-
-            let view = texture.create_view(&TextureViewDescriptor {
-                label: Some(&format!("kaku texture view for character: '{c}'")),
-                ..Default::default()
-            });
-
-            queue.write_texture(
-                wgpu::ImageCopyTexture {
-                    texture: &texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &image,
-                wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(width),
-                    rows_per_image: Some(height),
-                },
-                texture_size,
-            );
-
-            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
-                ..Default::default()
-            });
-
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("kaku bind group for character '{c}'")),
-                layout: &self.char_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&sampler),
-                    },
-                ],
-            });
+            let bind_group = self.create_char_bind_group(c, &image, device, queue);
 
             CharTexture {
                 // TODO: Get rid of this
@@ -685,7 +682,7 @@ impl TextRenderer {
                 //
                 // but, it will have to be removed eventually
                 bind_group: Box::leak(Box::new(bind_group)),
-                size: [width as f32, height as f32],
+                size: [image.width() as f32, image.height() as f32],
                 position: [x, y],
             }
         });
@@ -718,65 +715,7 @@ impl TextRenderer {
             let mut image = image::GrayImage::new(width, height);
             outlined.draw(|x, y, val| image.put_pixel(x, y, image::Luma([(val * 255.) as u8])));
 
-            let texture_size = wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            };
-
-            let texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some(&format!("kaku texture for character: '{c}'")),
-                size: texture_size,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R8Unorm,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-                mip_level_count: 1,
-                // TODO: multisampling
-                sample_count: 1,
-            });
-
-            let view = texture.create_view(&TextureViewDescriptor {
-                label: Some(&format!("kaku texture view for character: '{c}'")),
-                ..Default::default()
-            });
-
-            queue.write_texture(
-                wgpu::ImageCopyTexture {
-                    texture: &texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &image,
-                wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(width),
-                    rows_per_image: Some(height),
-                },
-                texture_size,
-            );
-
-            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
-                ..Default::default()
-            });
-
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("kaku bind group for character '{c}'")),
-                layout: &self.char_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&sampler),
-                    },
-                ],
-            });
+            let bind_group = self.create_char_bind_group(c, &image, device, queue);
 
             CharTexture {
                 // TODO: Get rid of this
@@ -789,11 +728,81 @@ impl TextRenderer {
                 //
                 // but, it will have to be removed eventually
                 bind_group: Box::leak(Box::new(bind_group)),
-                size: [width as f32, height as f32],
+                size: [image.width() as f32, image.height() as f32],
                 position: [x, y],
             }
         });
 
         Character { texture, advance }
+    }
+
+    fn create_char_bind_group(
+        &self,
+        c: char,
+        image: &GrayImage,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> wgpu::BindGroup {
+        let texture_size = wgpu::Extent3d {
+            width: image.width(),
+            height: image.height(),
+            depth_or_array_layers: 1,
+        };
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(&format!("kaku texture for character: '{c}'")),
+            size: texture_size,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+            mip_level_count: 1,
+            // TODO: multisampling
+            sample_count: 1,
+        });
+
+        let view = texture.create_view(&TextureViewDescriptor {
+            label: Some(&format!("kaku texture view for character: '{c}'")),
+            ..Default::default()
+        });
+
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            image,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(image.width()),
+                rows_per_image: Some(image.height()),
+            },
+            texture_size,
+        );
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("kaku bind group for character '{c}'")),
+            layout: &self.char_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+
+        bind_group
     }
 }

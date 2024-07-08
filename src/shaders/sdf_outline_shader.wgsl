@@ -51,9 +51,9 @@ fn scale_distance(value: f32, radius: f32) -> f32 {
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let value = textureSample(texture, texture_sampler, input.tex_coord).r;
     let distance = scale_distance(value, settings.sdf_radius);
-
     let aa_thresh = min(1.0, 1.0 / settings.image_scale);
+    let radius = settings.outline_radius / settings.image_scale;
+    let outline_alpha = smoothstep(radius + aa_thresh, radius - aa_thresh, distance) * settings.outline_colour.a;
 
-    let alpha = smoothstep(aa_thresh, -aa_thresh, distance);
-    return vec4<f32>(settings.colour.rgb, settings.colour.a * alpha);
+    return vec4<f32>(settings.outline_colour.rgb, outline_alpha);
 }
