@@ -29,7 +29,7 @@ fn vs_main(vertex: VertexInput, instance: CharacterInstance) -> VertexOutput {
 struct SdfTextSettings {
     @location(0) colour: vec4<f32>,
     @location(1) outline_colour: vec4<f32>,
-    @location(2) outline_radius: f32,
+    @location(2) outline_width: f32,
     @location(3) sdf_radius: f32,
     @location(4) image_scale: f32,
 };

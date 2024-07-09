@@ -1,3 +1,8 @@
+//! Demo - an example that shows all the things that kaku can do.
+//!
+//! Since this demo has to be integrated into wgpu and winit, the code is pretty verbose. I've
+//! commented the code that's important to this crate, so you don't have to sift through all the
+//! boilerplate.
 mod wgpu_renderer;
 use std::{sync::Arc, time::Instant};
 
@@ -14,10 +19,7 @@ use winit::{
     window::Window,
 };
 
-use kaku::{
-    text::{Outline, Text, TextData, TextOptions},
-    SdfSettings, TextRenderer,
-};
+use kaku::{SdfSettings, Text, TextBuilder, TextRenderer};
 
 const FPS_POLL_TIME_LIMIT: f32 = 0.5;
 
@@ -39,87 +41,49 @@ struct BasicTextApp {
 }
 
 impl BasicTextAppInner {
+    // -- IMPORTANT CODE IS IN THIS IMPL BLOCK --
+
     fn new(window: Arc<Window>) -> Self {
         let renderer = Renderer::new(window);
+
+        // To use kaku, you first need to create a TextRenderer. This holds onto important data on
+        // the GPU that we need to use for rendering.
         let mut text_renderer = TextRenderer::new(&renderer.device, &renderer.config);
         let fira_sans = FontArc::new(
             FontRef::try_from_slice(include_bytes!("../fonts/FiraSans-Regular.ttf")).unwrap(),
         );
+
         let fira_sans_sdf =
             text_renderer.load_font_with_sdf(fira_sans.clone(), 60., SdfSettings { radius: 20.0 });
         let fira_sans = text_renderer.load_font(fira_sans, 60.);
 
-        let hello_world = text_renderer.create_text(
-            TextData::new(
-                "hello, world! glyph :3",
-                [50., 120.],
-                fira_sans,
-                Default::default(),
-            ),
-            &renderer.device,
-            &renderer.queue,
-        );
+        // If you want to create a lot of similar text with slightly different options, you can use
+        // the TextBuilder in a stateful way:
+        let mut builder = TextBuilder::new("hello, world! glyph :3", fira_sans, [50., 120.]);
 
-        let hello_world_sdf = text_renderer.create_text(
-            TextData::new(
-                "hello, world! glyph :3",
-                [50., 220.],
-                fira_sans_sdf,
-                Default::default(),
-            ),
-            &renderer.device,
-            &renderer.queue,
-        );
+        let hello_world = builder.build(&renderer.device, &renderer.queue, &text_renderer);
 
-        let hello_world_outline = text_renderer.create_text(
-            TextData::new(
-                "hello, world! glyph :3",
-                [50., 320.],
-                fira_sans_sdf,
-                TextOptions {
-                    colour: [1.; 4],
-                    outline: Some(kaku::text::Outline {
-                        colour: [1., 0., 0., 1.],
-                        width: 15.,
-                    }),
-                    ..Default::default()
-                },
-            ),
-            &renderer.device,
-            &renderer.queue,
-        );
+        builder.font(fira_sans_sdf);
+        builder.position([50., 220.]);
+        let hello_world_sdf = builder.build(&renderer.device, &renderer.queue, &text_renderer);
 
-        let hello_world_scaled = text_renderer.create_text(
-            TextData::new(
-                "hello, world! glyph :3",
-                [50., 520.],
-                fira_sans_sdf,
-                TextOptions {
-                    scale: 2.0,
-                    ..Default::default()
-                },
-            ),
-            &renderer.device,
-            &renderer.queue,
-        );
+        builder.position([50., 320.]);
+        builder.color([1.; 4]);
+        builder.outlined([1., 0., 0., 1.], 15.);
+        let hello_world_outline = builder.build(&renderer.device, &renderer.queue, &text_renderer);
 
-        let fps_text = text_renderer.create_text(
-            TextData::new(
-                "fps: ",
-                [40., 40.],
-                fira_sans_sdf,
-                TextOptions {
-                    colour: [1., 0., 1., 1.],
-                    scale: 0.3,
-                    outline: Some(Outline {
-                        colour: [0., 0., 0., 1.],
-                        width: 2.,
-                    }),
-                },
-            ),
-            &renderer.device,
-            &renderer.queue,
-        );
+        builder.position([50., 520.]);
+        builder.scale(2.);
+        builder.color([0., 0., 0., 1.]);
+        builder.no_outline();
+        let hello_world_scaled = builder.build(&renderer.device, &renderer.queue, &text_renderer);
+
+        // Or you can use the builder with chained methods like this for a one-off
+        let fps_text = TextBuilder::new("fps: ", fira_sans_sdf, [40., 40.])
+            .color([1., 0., 1., 1.])
+            .scale(0.3)
+            .outlined([1., 1., 1., 1.], 2.)
+            .build(&renderer.device, &renderer.queue, &text_renderer);
 
         Self {
             text_renderer,
@@ -141,6 +105,7 @@ impl BasicTextAppInner {
         if elapsed > FPS_POLL_TIME_LIMIT {
             let fps = self.frame_count / elapsed;
 
+            // Notice
             self.fps_text.change_text(
                 format!("fps: {fps:.2}"),
                 &self.renderer.device,
@@ -154,6 +119,9 @@ impl BasicTextAppInner {
     }
 
     fn render(&mut self) -> Result<(), SurfaceError> {
+        // Here is where we actually render our text!
+        //
+        // First, set up the render pass...
         let output = self.renderer.surface.get_current_texture()?;
         let view = output
             .texture
@@ -186,7 +154,7 @@ impl BasicTextAppInner {
             timestamp_writes: None,
         });
 
-        // Important code is here!
+        // Now, we can simply draw our Text objects onto the render pass using the TextRenderer
         self.text_renderer
             .draw_text(&mut render_pass, &self.fps_text);
         self.text_renderer
@@ -197,6 +165,8 @@ impl BasicTextAppInner {
             .draw_text(&mut render_pass, &self.hello_world_outline);
         self.text_renderer
             .draw_text(&mut render_pass, &self.hello_world_scaled);
+
+        // And that's it!
 
         drop(render_pass);
 

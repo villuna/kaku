@@ -5,16 +5,15 @@
 //! targeting video games. It can render text normally (using raster images), or with signed
 //! distance fields, which allow for performant scaling and effects such as outlines, glows and
 //! shadows.
-//!
-//! I used [the learn wgpu tutorial](https://sotrh.github.io/learn-wgpu/) as reference for a lot of
-//! the wgpu code in this crate (particularly examples).
 
 mod sdf;
-pub mod text;
+mod text;
+
+pub use text::{Text, TextBuilder};
 
 use image::GrayImage;
 use rayon::iter::{IntoParallelIterator, ParallelExtend, ParallelIterator};
-use text::{Text, TextData};
+use text::TextOptions;
 
 use std::num::NonZeroU64;
 use std::sync::RwLock;
@@ -54,6 +53,8 @@ type CharacterCache = HashMap<char, Character>;
 ///
 /// When you load a font into the text renderer using [TextRenderer::load_font], it will give you
 /// back one of these IDs referencing that font.
+///
+/// Most functions in the TextRenderer will panic if you provide a FontId that is invalid.
 #[derive(Debug, Eq, PartialEq, Hash, Clone, Copy)]
 pub struct FontId(usize);
 
@@ -110,7 +111,7 @@ impl FontMap {
     fn get(&self, font: FontId) -> &FontData {
         // This works because we never delete fonts and the only safe way to get a fontid is through
         // this struct
-        &self.fonts[font.0]
+        self.fonts.get(font.0).expect("Font not found in renderer!")
     }
 }
 
@@ -197,6 +198,40 @@ fn character_instance_layout() -> wgpu::VertexBufferLayout<'static> {
     }
 }
 
+fn create_text_pipeline(label: &str, layout: &wgpu::PipelineLayout, render_format: wgpu::TextureFormat, shader: &wgpu::ShaderModule, device: &wgpu::Device) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: "vs_main",
+            buffers: &[texture_vertex_layout(), character_instance_layout()],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: "fs_main",
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: render_format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleStrip,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState {
+            count: 1,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
+        multiview: None,
+    })
+}
+
 /// The main struct that handles text rendering to the screen. Use this struct to load fonts and
 /// draw text during a render pass.
 pub struct TextRenderer {
@@ -243,7 +278,7 @@ impl TextRenderer {
                 ],
             });
 
-        // The screen bind group transforms pixel coords into screen coords
+        // The screen uniform is a matrix that transforms pixel coords into screen coords
         let screen_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("kaku screen uniform bind group layout"),
@@ -263,8 +298,6 @@ impl TextRenderer {
 
         let screen_uniform = ScreenUniform::new((target_config.width, target_config.height));
 
-        // hey british guy, what's the wgpu function to create a buffer with no data?
-        // "why it's device.create_buffer init"
         let screen_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("kaku screen uniform buffer"),
             contents: bytemuck::cast_slice(&[screen_uniform]),
@@ -327,37 +360,13 @@ impl TextRenderer {
 
         let basic_shader = device.create_shader_module(include_wgsl!("shaders/text_shader.wgsl"));
 
-        let basic_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("kaku text rendering pipeline"),
-            layout: Some(&basic_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &basic_shader,
-                entry_point: "vs_main",
-                buffers: &[texture_vertex_layout(), character_instance_layout()],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &basic_shader,
-                entry_point: "fs_main",
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: target_config.format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-        });
+        let basic_pipeline = create_text_pipeline(
+            "kaku basic text render pipeline",
+            &basic_pipeline_layout,
+            target_config.format,
+            &basic_shader,
+            device
+        );
 
         // The render pipeline to use to render the text with no sdf
         let sdf_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -372,72 +381,24 @@ impl TextRenderer {
 
         let sdf_shader = device.create_shader_module(include_wgsl!("shaders/sdf_text_shader.wgsl"));
 
-        let sdf_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("kaku sdf text rendering pipeline"),
-            layout: Some(&sdf_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &sdf_shader,
-                entry_point: "vs_main",
-                buffers: &[texture_vertex_layout(), character_instance_layout()],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &sdf_shader,
-                entry_point: "fs_main",
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: target_config.format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-        });
+        let sdf_pipeline = create_text_pipeline(
+            "kaku sdf text render pipeline",
+            &sdf_pipeline_layout,
+            target_config.format,
+            &sdf_shader,
+            device,
+        );
 
         let outline_shader =
             device.create_shader_module(include_wgsl!("shaders/sdf_outline_shader.wgsl"));
 
-        let outline_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("kaku sdf text rendering pipeline"),
-            layout: Some(&sdf_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &outline_shader,
-                entry_point: "vs_main",
-                buffers: &[texture_vertex_layout(), character_instance_layout()],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &outline_shader,
-                entry_point: "fs_main",
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: target_config.format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-        });
+        let outline_pipeline = create_text_pipeline(
+            "kaku sdf text outline render pipeline",
+            &sdf_pipeline_layout,
+            target_config.format,
+            &outline_shader,
+            device,
+        );
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("kaku character vertex buffer"),
@@ -495,11 +456,6 @@ impl TextRenderer {
             .load_with_sdf(FontArc::new(font), size, sdf_settings)
     }
 
-    /// Creates a new [Text] object, and creates all gpu buffers needed for it
-    pub fn create_text(&self, text: TextData, device: &wgpu::Device, queue: &wgpu::Queue) -> Text {
-        Text::new(text, device, queue, self)
-    }
-
     /// Draws a [Text] object to the given render pass.
     pub fn draw_text<'pass>(
         &'pass self,
@@ -507,9 +463,9 @@ impl TextRenderer {
         text: &'pass Text,
     ) {
         // Set the pipeline depending on if the font uses sdf
-        let font_data = self.fonts.get(text.data.font);
+        let font_data = self.fonts.get(text.options.font);
         let use_sdf = font_data.sdf_settings.is_some();
-        let use_outline = use_sdf && text.data.options.outline.is_some();
+        let use_outline = use_sdf && text.options.outline.is_some();
 
         if font_data.sdf_settings.is_some() {
             render_pass.set_pipeline(&self.sdf_pipeline);
@@ -528,7 +484,7 @@ impl TextRenderer {
             render_pass.set_pipeline(&self.outline_pipeline);
 
             let mut i = 0;
-            for c in text.data.text.chars() {
+            for c in text.options.text.chars() {
                 let char_data = char_cache.get(&c).unwrap();
 
                 if let Some(texture) = &char_data.texture {
@@ -542,7 +498,7 @@ impl TextRenderer {
         }
 
         let mut i = 0;
-        for c in text.data.text.chars() {
+        for c in text.options.text.chars() {
             let char_data = char_cache.get(&c).unwrap();
 
             if let Some(texture) = &char_data.texture {
@@ -558,10 +514,10 @@ impl TextRenderer {
         self.fonts.get(font).sdf_settings.is_some()
     }
 
-    fn create_text_instances(&self, text: &TextData) -> Vec<CharacterInstance> {
+    fn create_text_instances(&self, text: &TextOptions) -> Vec<CharacterInstance> {
         let mut position = text.position;
         let char_cache = self.fonts.get(text.font).char_cache.read().unwrap();
-        let scale = text.options.scale;
+        let scale = text.scale;
 
         let instances: Vec<CharacterInstance> = text
             .text

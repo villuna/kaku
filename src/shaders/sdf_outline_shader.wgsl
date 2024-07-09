@@ -29,7 +29,7 @@ fn vs_main(vertex: VertexInput, instance: CharacterInstance) -> VertexOutput {
 struct SdfTextSettings {
     @location(0) colour: vec4<f32>,
     @location(1) outline_colour: vec4<f32>,
-    @location(2) outline_radius: f32,
+    @location(2) outline_width: f32,
     @location(3) sdf_radius: f32,
     @location(4) image_scale: f32,
 };
@@ -52,7 +52,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let value = textureSample(texture, texture_sampler, input.tex_coord).r;
     let distance = scale_distance(value, settings.sdf_radius);
     let aa_thresh = min(1.0, 1.0 / settings.image_scale);
-    let radius = settings.outline_radius / settings.image_scale;
+    let radius = settings.outline_width / settings.image_scale;
     let outline_alpha = smoothstep(radius + aa_thresh, radius - aa_thresh, distance) * settings.outline_colour.a;
 
     return vec4<f32>(settings.outline_colour.rgb, outline_alpha);
