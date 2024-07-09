@@ -86,6 +86,8 @@ pub struct Text {
     pub(crate) data: TextData,
     pub(crate) instance_buffer: wgpu::Buffer,
     pub(crate) settings_bind_group: wgpu::BindGroup,
+
+    instance_capacity: usize,
 }
 
 impl Text {
@@ -98,7 +100,13 @@ impl Text {
         text_renderer: &TextRenderer,
     ) -> Self {
         text_renderer.update_char_textures(&data.text, data.font, device, queue);
-        let instance_buffer = text_renderer.create_buffer_for_text(&data, device);
+        let instances = text_renderer.create_text_instances(&data);
+
+        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("kaku text instance buffer"),
+            contents: bytemuck::cast_slice(&instances),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
 
         let settings_bind_group = if text_renderer.font_uses_sdf(data.font) {
             let text_settings = data.sdf_settings_uniform(&text_renderer.fonts);
@@ -139,6 +147,29 @@ impl Text {
             data,
             instance_buffer,
             settings_bind_group,
+            instance_capacity: instances.len(),
+        }
+    }
+
+    /// Changes the text displayed by this text object.
+    /// 
+    /// This is faster than recreating the object because it may reuse its existing gpu buffer
+    /// instead of recreating it.
+    pub fn change_text(&mut self, text: String, device: &wgpu::Device, queue: &wgpu::Queue, text_renderer: &TextRenderer) {
+        text_renderer.update_char_textures(&text, self.data.font, device, queue);
+        self.data.text = text;
+        let new_instances = text_renderer.create_text_instances(&self.data);
+
+        if new_instances.len() > self.instance_capacity {
+            self.instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("kaku text instance buffer"),
+                contents: bytemuck::cast_slice(&new_instances),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            });
+
+            self.instance_capacity = new_instances.len();
+        } else {
+            queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&new_instances));
         }
     }
 }

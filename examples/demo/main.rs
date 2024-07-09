@@ -16,7 +16,7 @@ use winit::{
 
 use kaku::{
     text::{Outline, Text, TextData, TextOptions},
-    FontId, SdfSettings, TextRenderer,
+    SdfSettings, TextRenderer,
 };
 
 const FPS_POLL_TIME_LIMIT: f32 = 0.5;
@@ -28,7 +28,6 @@ struct BasicTextAppInner {
     hello_world_sdf: Text,
     hello_world_outline: Text,
     hello_world_scaled: Text,
-    fira_sans_sdf: FontId,
     fps_text: Text,
     frame_count: f32,
     fps_poll_start: Instant,
@@ -129,7 +128,6 @@ impl BasicTextAppInner {
             hello_world_sdf,
             hello_world_outline,
             hello_world_scaled,
-            fira_sans_sdf,
             fps_text,
             fps_poll_start: Instant::now(),
             frame_count: 0.,
@@ -143,22 +141,11 @@ impl BasicTextAppInner {
         if elapsed > FPS_POLL_TIME_LIMIT {
             let fps = self.frame_count / elapsed;
 
-            self.fps_text = self.text_renderer.create_text(
-                TextData::new(
-                    format!("fps: {fps:.2}"),
-                    [40., 40.],
-                    self.fira_sans_sdf,
-                    TextOptions {
-                        colour: [1., 0., 1., 1.],
-                        scale: 0.3,
-                        outline: Some(Outline {
-                            colour: [0., 0., 0., 1.],
-                            width: 3.,
-                        }),
-                    },
-                ),
+            self.fps_text.change_text(
+                format!("fps: {fps:.2}"),
                 &self.renderer.device,
                 &self.renderer.queue,
+                &self.text_renderer,
             );
 
             self.frame_count = 0.;

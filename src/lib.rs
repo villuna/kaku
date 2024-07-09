@@ -558,8 +558,7 @@ impl TextRenderer {
         self.fonts.get(font).sdf_settings.is_some()
     }
 
-    /// Creates an instance buffer for a given piece of text
-    fn create_buffer_for_text(&self, text: &TextData, device: &wgpu::Device) -> wgpu::Buffer {
+    fn create_text_instances(&self, text: &TextData) -> Vec<CharacterInstance> {
         let mut position = text.position;
         let char_cache = self.fonts.get(text.font).char_cache.read().unwrap();
         let scale = text.options.scale;
@@ -588,13 +587,7 @@ impl TextRenderer {
             })
             .collect_vec();
 
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("kaku text instance buffer"),
-            contents: bytemuck::cast_slice(&instances),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        instance_buffer
+        instances
     }
 
     /// Creates and caches the character textures necessary to draw a certain string with a given
