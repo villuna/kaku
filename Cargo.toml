@@ -2,7 +2,13 @@
 name = "kaku"
 version = "0.1.0"
 edition = "2021"
+description = "A text rendering crate for wgpu using signed distance fields"
+repository = "https://github.com/villuna/kaku"
+readme = "README.md"
+license = "MIT"
 authors = ["Luna Borella <ulfrthewolf at gmail dot com>"]
+keywords = ["graphics", "text", "wgpu"]
+categories = ["graphics", "rendering"]
 
 [dependencies]
 ab_glyph = "0.2.26"
