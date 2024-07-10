@@ -86,7 +86,7 @@ impl TextBuilder {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        text_renderer: &TextRenderer,
+        text_renderer: &mut TextRenderer,
     ) -> Text {
         let data = TextData {
             text: self.text.clone(),
@@ -207,7 +207,7 @@ impl Text {
         data: TextData,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        text_renderer: &TextRenderer,
+        text_renderer: &mut TextRenderer,
     ) -> Self {
         text_renderer.update_char_textures(&data.text, data.font, device, queue);
         let instances = text_renderer.create_text_instances(&data);
@@ -275,7 +275,7 @@ impl Text {
         text: String,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        text_renderer: &TextRenderer,
+        text_renderer: &mut TextRenderer,
     ) {
         text_renderer.update_char_textures(&text, self.data.font, device, queue);
         self.data.text = text;

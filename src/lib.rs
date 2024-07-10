@@ -18,7 +18,7 @@
 //!
 //! let text = TextBuilder::new("Hello, world!", font, [100., 100.])
 //!     .outlined([1.; 4], 10.)
-//!     .build(&device, &queue, &text_renderer);
+//!     .build(&device, &queue, &mut text_renderer);
 //! ```
 //!
 //! Then, you can draw this text object very simply during a render pass:
@@ -33,11 +33,10 @@ mod text;
 pub use text::{Text, TextBuilder};
 
 use image::GrayImage;
-use rayon::iter::{IntoParallelIterator, ParallelExtend, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use text::TextData;
 
 use std::num::NonZeroU64;
-use std::sync::RwLock;
 
 pub use ab_glyph;
 use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
@@ -54,7 +53,7 @@ pub use sdf::SdfSettings;
 
 #[derive(Debug)]
 struct CharTexture {
-    bind_group: &'static wgpu::BindGroup,
+    bind_group: wgpu::BindGroup,
     position: [f32; 2],
     size: [f32; 2],
 }
@@ -82,7 +81,7 @@ pub struct FontId(usize);
 struct FontData {
     font: FontArc,
     scale: PxScale,
-    char_cache: RwLock<CharacterCache>,
+    char_cache: CharacterCache,
     sdf_settings: Option<SdfSettings>,
 }
 
@@ -130,9 +129,11 @@ impl FontMap {
     }
 
     fn get(&self, font: FontId) -> &FontData {
-        // This works because we never delete fonts and the only safe way to get a fontid is through
-        // this struct
         self.fonts.get(font.0).expect("Font not found in renderer!")
+    }
+
+    fn get_mut(&mut self, font: FontId) -> &mut FontData {
+        self.fonts.get_mut(font.0).expect("Font not found in renderer!") 
     }
 }
 
@@ -500,7 +501,6 @@ impl TextRenderer {
         }
 
         let font_data = self.fonts.get(text.data.font);
-        let char_cache = font_data.char_cache.read().unwrap();
 
         render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
         render_pass.set_bind_group(2, &text.settings_bind_group, &[]);
@@ -512,10 +512,10 @@ impl TextRenderer {
 
             let mut i = 0;
             for c in text.data.text.chars() {
-                let char_data = char_cache.get(&c).unwrap();
+                let char_data = font_data.char_cache.get(&c).unwrap();
 
                 if let Some(texture) = &char_data.texture {
-                    render_pass.set_bind_group(1, texture.bind_group, &[]);
+                    render_pass.set_bind_group(1, &texture.bind_group, &[]);
                     render_pass.draw(0..4, i as u32..i as u32 + 1);
                     i += 1;
                 }
@@ -526,10 +526,10 @@ impl TextRenderer {
 
         let mut i = 0;
         for c in text.data.text.chars() {
-            let char_data = char_cache.get(&c).unwrap();
+            let char_data = font_data.char_cache.get(&c).unwrap();
 
             if let Some(texture) = &char_data.texture {
-                render_pass.set_bind_group(1, texture.bind_group, &[]);
+                render_pass.set_bind_group(1, &texture.bind_group, &[]);
                 render_pass.draw(0..4, i as u32..i as u32 + 1);
                 i += 1;
             }
@@ -543,7 +543,7 @@ impl TextRenderer {
 
     fn create_text_instances(&self, text: &TextData) -> Vec<CharacterInstance> {
         let mut position = text.position;
-        let char_cache = self.fonts.get(text.font).char_cache.read().unwrap();
+        let char_cache = &self.fonts.get(text.font).char_cache;
         let scale = text.scale;
 
         let instances: Vec<CharacterInstance> = text
@@ -584,33 +584,34 @@ impl TextRenderer {
     /// you might want to cache all the characters from '0' to '9' beforehand to save this from
     /// happening between frames.
     pub fn update_char_textures(
-        &self,
+        &mut self,
         text: &str,
         font: FontId,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) {
-        let font_data = self.fonts.get(font);
-        let mut char_cache = font_data.char_cache.write().unwrap();
-        let new_characters = text
-            .chars()
-            .filter(|c| !char_cache.contains_key(c))
-            .unique()
-            .collect_vec();
+        let char_data = {
+            let font_data = self.fonts.get(font);
+            let new_characters = text
+                .chars()
+                .filter(|c| !font_data.char_cache.contains_key(c))
+                .unique()
+                .collect_vec();
 
-        let font = &font_data.font;
-        let scale = font_data.scale;
-        let sdf = font_data.sdf_settings.as_ref();
+            let font = &font_data.font;
+            let scale = font_data.scale;
+            let sdf = font_data.sdf_settings.as_ref();
 
-        let char_data = new_characters.into_par_iter().map(|c| {
-            let data = match sdf {
-                None => self.create_char_texture(c, font, scale, device, queue),
-                Some(sdf) => self.create_char_texture_sdf(c, font, scale, sdf, device, queue),
-            };
-            (c, data)
-        });
+            new_characters.into_par_iter().map(|c| {
+                let data = match sdf {
+                    None => self.create_char_texture(c, font, scale, device, queue),
+                    Some(sdf) => self.create_char_texture_sdf(c, font, scale, sdf, device, queue),
+                };
+                (c, data)
+            }).collect::<Vec<_>>()
+        };
 
-        char_cache.par_extend(char_data);
+        self.fonts.get_mut(font).char_cache.extend(char_data);
     }
 
     fn create_char_texture_sdf(
@@ -648,16 +649,7 @@ impl TextRenderer {
             let bind_group = self.create_char_bind_group(c, &image, device, queue);
 
             CharTexture {
-                // TODO: Get rid of this
-                // this is a hack to get past the render pass lifetime restriction until the wgpu
-                // update that will get rid of it
-                //
-                // For now, this is all I need since I will never be deleting textures from the
-                // cache and will never be dropping the texture cache (in the game this crate was
-                // originally made for)
-                //
-                // but, it will have to be removed eventually
-                bind_group: Box::leak(Box::new(bind_group)),
+                bind_group,
                 size: [image.width() as f32, image.height() as f32],
                 position: [x, y],
             }
@@ -694,16 +686,7 @@ impl TextRenderer {
             let bind_group = self.create_char_bind_group(c, &image, device, queue);
 
             CharTexture {
-                // TODO: Get rid of this
-                // this is a hack to get past the render pass lifetime restriction until the wgpu
-                // update that will get rid of it
-                //
-                // For now, this is all I need since I will never be deleting textures from the
-                // cache and will never be dropping the texture cache (in the game this crate was
-                // originally made for)
-                //
-                // but, it will have to be removed eventually
-                bind_group: Box::leak(Box::new(bind_group)),
+                bind_group,
                 size: [image.width() as f32, image.height() as f32],
                 position: [x, y],
             }
