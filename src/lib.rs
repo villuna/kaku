@@ -3,8 +3,29 @@
 //!
 //! This crate aims to provide a general and easy to use API for rendering text using [wgpu], mainly
 //! targeting video games. It can render text normally (using raster images), or with signed
-//! distance fields, which allow for performant scaling and effects such as outlines, glows and
-//! shadows.
+//! distance fields, which allows for performant scaling and outlining, but takes longer when
+//! initially creating textures for each character.
+//!
+//! # Usage
+//!
+//! First, create a [TextRenderer]. Then, load an [ab_glyph] font using [TextRenderer::load_font].
+//! Then, create a drawable [Text] object using a [TextBuilder]:
+//!
+//! ```rust
+//! let mut text_renderer = TextRenderer::new(&device, &surface_config);
+//! let font = ab_glyph::FontRef::try_from_slice(include_bytes!("FiraSans-Regular.ttf"))?;
+//! let font = text_renderer.load_font_sdf(font, 45., SdfSettings { radius: 15. });
+//!
+//! let text = TextBuilder::new("Hello, world!", font, [100., 100.])
+//!     .outlined([1.; 4], 10.)
+//!     .build(&device, &queue, &text_renderer);
+//! ```
+//!
+//! Then, you can draw this text object very simply during a render pass:
+//!
+//! ```rust
+//! text_renderer.draw(&mut render_pass, &text);
+//! ```
 
 mod sdf;
 mod text;
@@ -13,7 +34,7 @@ pub use text::{Text, TextBuilder};
 
 use image::GrayImage;
 use rayon::iter::{IntoParallelIterator, ParallelExtend, ParallelIterator};
-use text::TextOptions;
+use text::TextData;
 
 use std::num::NonZeroU64;
 use std::sync::RwLock;
@@ -198,7 +219,13 @@ fn character_instance_layout() -> wgpu::VertexBufferLayout<'static> {
     }
 }
 
-fn create_text_pipeline(label: &str, layout: &wgpu::PipelineLayout, render_format: wgpu::TextureFormat, shader: &wgpu::ShaderModule, device: &wgpu::Device) -> wgpu::RenderPipeline {
+fn create_text_pipeline(
+    label: &str,
+    layout: &wgpu::PipelineLayout,
+    render_format: wgpu::TextureFormat,
+    shader: &wgpu::ShaderModule,
+    device: &wgpu::Device,
+) -> wgpu::RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(label),
         layout: Some(layout),
@@ -365,7 +392,7 @@ impl TextRenderer {
             &basic_pipeline_layout,
             target_config.format,
             &basic_shader,
-            device
+            device,
         );
 
         // The render pipeline to use to render the text with no sdf
@@ -463,16 +490,16 @@ impl TextRenderer {
         text: &'pass Text,
     ) {
         // Set the pipeline depending on if the font uses sdf
-        let font_data = self.fonts.get(text.options.font);
-        let use_sdf = font_data.sdf_settings.is_some();
-        let use_outline = use_sdf && text.options.outline.is_some();
+        let use_sdf = self.font_uses_sdf(text.data.font);
+        let use_outline = text.data.sdf.is_some_and(|sdf| sdf.outline.is_some());
 
-        if font_data.sdf_settings.is_some() {
+        if use_sdf {
             render_pass.set_pipeline(&self.sdf_pipeline);
         } else {
             render_pass.set_pipeline(&self.basic_pipeline);
         }
 
+        let font_data = self.fonts.get(text.data.font);
         let char_cache = font_data.char_cache.read().unwrap();
 
         render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
@@ -484,7 +511,7 @@ impl TextRenderer {
             render_pass.set_pipeline(&self.outline_pipeline);
 
             let mut i = 0;
-            for c in text.options.text.chars() {
+            for c in text.data.text.chars() {
                 let char_data = char_cache.get(&c).unwrap();
 
                 if let Some(texture) = &char_data.texture {
@@ -498,7 +525,7 @@ impl TextRenderer {
         }
 
         let mut i = 0;
-        for c in text.options.text.chars() {
+        for c in text.data.text.chars() {
             let char_data = char_cache.get(&c).unwrap();
 
             if let Some(texture) = &char_data.texture {
@@ -514,7 +541,7 @@ impl TextRenderer {
         self.fonts.get(font).sdf_settings.is_some()
     }
 
-    fn create_text_instances(&self, text: &TextOptions) -> Vec<CharacterInstance> {
+    fn create_text_instances(&self, text: &TextData) -> Vec<CharacterInstance> {
         let mut position = text.position;
         let char_cache = self.fonts.get(text.font).char_cache.read().unwrap();
         let scale = text.scale;

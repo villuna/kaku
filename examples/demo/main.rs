@@ -21,6 +21,35 @@ use winit::{
 
 use kaku::{SdfSettings, Text, TextBuilder, TextRenderer};
 
+fn hsva_to_rgba(mut h: f32, mut s: f32, mut v: f32, a: f32) -> [f32; 4] {
+    s = s.clamp(0., 1.);
+    v = v.clamp(0., 1.);
+    h %= 360.0;
+
+    let c = v * s;
+    let hp = h / 60.;
+    let x = c * (1. - (hp % 2. - 1.).abs());
+
+    let [r1, g1, b1] = if 0. <= hp && hp < 1. {
+        [c, x, 0.]
+    } else if 1. <= hp && hp < 2. {
+        [x, c, 0.]
+    } else if 2. <= hp && hp < 3. {
+        [0., c, x]
+    } else if 3. <= hp && hp < 4. {
+        [0., x, c]
+    } else if 4. <= hp && hp < 5. {
+        [x, 0., c]
+    } else if 5. <= hp && hp < 6. {
+        [c, 0., x]
+    } else {
+        unreachable!()
+    };
+
+    let m = v - c;
+    [r1 + m, g1 + m, b1 + m, a]
+}
+
 const FPS_POLL_TIME_LIMIT: f32 = 0.5;
 
 struct BasicTextAppInner {
@@ -33,6 +62,7 @@ struct BasicTextAppInner {
     fps_text: Text,
     frame_count: f32,
     fps_poll_start: Instant,
+    start: Instant,
 }
 
 #[derive(Default)]
@@ -67,9 +97,10 @@ impl BasicTextAppInner {
         builder.position([50., 220.]);
         let hello_world_sdf = builder.build(&renderer.device, &renderer.queue, &text_renderer);
 
+        let outline_color = hsva_to_rgba(0.0, 1.0, 1.0, 1.0);
         builder.position([50., 320.]);
         builder.color([1.; 4]);
-        builder.outlined([1., 0., 0., 1.], 15.);
+        builder.outlined(outline_color, 15.);
         let hello_world_outline = builder.build(&renderer.device, &renderer.queue, &text_renderer);
 
         builder.position([50., 520.]);
@@ -95,6 +126,7 @@ impl BasicTextAppInner {
             fps_text,
             fps_poll_start: Instant::now(),
             frame_count: 0.,
+            start: Instant::now(),
         }
     }
 
@@ -105,8 +137,7 @@ impl BasicTextAppInner {
         if elapsed > FPS_POLL_TIME_LIMIT {
             let fps = self.frame_count / elapsed;
 
-            // Notice
-            self.fps_text.change_text(
+            self.fps_text.set_text(
                 format!("fps: {fps:.2}"),
                 &self.renderer.device,
                 &self.renderer.queue,
@@ -116,6 +147,12 @@ impl BasicTextAppInner {
             self.frame_count = 0.;
             self.fps_poll_start = Instant::now();
         }
+
+        let total_elapsed = self.start.elapsed().as_secs_f32();
+        let outline_color = hsva_to_rgba(total_elapsed * 50., 1., 1., 1.);
+        let outline_width = 10. * ((total_elapsed * std::f32::consts::PI).cos() + 1.) / 2. + 5.;
+        self.hello_world_outline
+            .set_outline(outline_color, outline_width, &self.renderer.queue);
     }
 
     fn render(&mut self) -> Result<(), SurfaceError> {

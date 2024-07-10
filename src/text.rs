@@ -5,7 +5,7 @@
 
 use wgpu::util::DeviceExt;
 
-use crate::{FontId, FontMap, TextRenderer};
+use crate::{FontId, TextRenderer};
 
 /// Options for a text outline.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -14,27 +14,35 @@ pub(crate) struct Outline {
     pub(crate) width: f32,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct SdfTextData {
+    pub(crate) radius: f32,
+    pub(crate) outline: Option<Outline>,
+}
+
 #[derive(Debug, Clone)]
-pub(crate) struct TextOptions {
+pub(crate) struct TextData {
     pub(crate) text: String,
     pub(crate) font: FontId,
     pub(crate) position: [f32; 2],
-    pub(crate) outline: Option<Outline>,
     pub(crate) color: [f32; 4],
     pub(crate) scale: f32,
+
+    pub(crate) sdf: Option<SdfTextData>,
 }
 
-impl TextOptions {
+impl TextData {
     fn settings_uniform(&self) -> SettingsUniform {
-        SettingsUniform {
-            color: self.color,
-        }
+        SettingsUniform { color: self.color }
     }
 
-    fn sdf_settings_uniform(&self, font_map: &FontMap) -> SdfSettingsUniform {
-        let outline_color = self.outline.map(|o| o.color).unwrap_or([0.; 4]);
-        let outline_width = self.outline.map(|o| o.width).unwrap_or(0.);
-        let sdf_radius = font_map.get(self.font).sdf_settings.expect("Sdf settings don't exist").radius;
+    fn sdf_settings_uniform(&self) -> SdfSettingsUniform {
+        let sdf = &self
+            .sdf
+            .expect("sdf_settings_uniform called but no sdf data found");
+        let outline_color = sdf.outline.map(|o| o.color).unwrap_or([0.; 4]);
+        let outline_width = sdf.outline.map(|o| o.width).unwrap_or(0.);
+        let sdf_radius = sdf.radius;
 
         SdfSettingsUniform {
             color: self.color,
@@ -50,22 +58,25 @@ impl TextOptions {
 /// A builder for a [Text] struct.
 #[derive(Debug, Clone)]
 pub struct TextBuilder {
-    options: TextOptions,
+    pub(crate) text: String,
+    pub(crate) font: FontId,
+    pub(crate) position: [f32; 2],
+    pub(crate) outline: Option<Outline>,
+    pub(crate) color: [f32; 4],
+    pub(crate) scale: f32,
 }
 
 impl TextBuilder {
     /// Creates a new TextBuilder.
     pub fn new(text: impl Into<String>, font: FontId, position: [f32; 2]) -> Self {
         Self {
-            options: TextOptions {
-                text: text.into(),
-                font,
-                position,
+            text: text.into(),
+            font,
+            position,
 
-                outline: None,
-                color: [0., 0., 0., 1.],
-                scale: 1.,
-            },
+            outline: None,
+            color: [0., 0., 0., 1.],
+            scale: 1.,
         }
     }
 
@@ -77,24 +88,41 @@ impl TextBuilder {
         queue: &wgpu::Queue,
         text_renderer: &TextRenderer,
     ) -> Text {
-        Text::new(self.options.clone(), device, queue, text_renderer)
+        let data = TextData {
+            text: self.text.clone(),
+            font: self.font,
+            position: self.position,
+            color: self.color,
+            scale: self.scale,
+
+            sdf: text_renderer.font_uses_sdf(self.font).then(|| SdfTextData {
+                radius: text_renderer
+                    .fonts
+                    .get(self.font)
+                    .sdf_settings
+                    .unwrap()
+                    .radius,
+                outline: self.outline,
+            }),
+        };
+        Text::new(data, device, queue, text_renderer)
     }
 
     /// Sets the content of the text.
     pub fn text(&mut self, text: String) -> &mut Self {
-        self.options.text = text;
+        self.text = text;
         self
     }
 
     /// Sets the font the text will be drawn with.
     pub fn font(&mut self, font: FontId) -> &mut Self {
-        self.options.font = font;
+        self.font = font;
         self
     }
 
     /// Sets the position of the text on the screen, in pixel coordinates.
     pub fn position(&mut self, position: [f32; 2]) -> &mut Self {
-        self.options.position = position;
+        self.position = position;
         self
     }
 
@@ -110,9 +138,9 @@ impl TextBuilder {
     /// use a wider radius (see [crate::SdfSettings]).
     pub fn outlined(&mut self, color: [f32; 4], width: f32) -> &mut Self {
         if width > 0. {
-            self.options.outline = Some(Outline { color, width });
+            self.outline = Some(Outline { color, width });
         } else {
-            self.options.outline = None;
+            self.outline = None;
         }
 
         self
@@ -123,13 +151,13 @@ impl TextBuilder {
     /// Text will not be outlined by default, so only use this if you've already set the outline
     /// and want to get rid of it e.g. when building another text object.
     pub fn no_outline(&mut self) -> &mut Self {
-        self.options.outline = None;
+        self.outline = None;
         self
     }
 
     /// Sets the colour of the text, in RGBA (values are in the range 0-1).
     pub fn color(&mut self, color: [f32; 4]) -> &mut Self {
-        self.options.color = color;
+        self.color = color;
         self
     }
 
@@ -139,7 +167,7 @@ impl TextBuilder {
     /// pixellation/bluriness. If it is sdf-enabled, it will be cleaner but you may still get
     /// artefacts at high scale.
     pub fn scale(&mut self, scale: f32) -> &mut Self {
-        self.options.scale = scale;
+        self.scale = scale;
         self
     }
 }
@@ -165,23 +193,24 @@ pub(crate) struct SdfSettingsUniform {
 /// then render it to a wgpu render pass using [TextRenderer::draw_text].
 #[derive(Debug)]
 pub struct Text {
-    pub(crate) options: TextOptions,
+    pub(crate) data: TextData,
     pub(crate) instance_buffer: wgpu::Buffer,
     pub(crate) settings_bind_group: wgpu::BindGroup,
 
+    settings_buffer: wgpu::Buffer,
     instance_capacity: usize,
 }
 
 impl Text {
     /// Creates a new [Text] object and uploads all necessary data to the GPU.
     fn new(
-        options: TextOptions,
+        data: TextData,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         text_renderer: &TextRenderer,
     ) -> Self {
-        text_renderer.update_char_textures(&options.text, options.font, device, queue);
-        let instances = text_renderer.create_text_instances(&options);
+        text_renderer.update_char_textures(&data.text, data.font, device, queue);
+        let instances = text_renderer.create_text_instances(&data);
 
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("kaku text instance buffer"),
@@ -189,24 +218,26 @@ impl Text {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
-        let settings_bind_group = if text_renderer.font_uses_sdf(options.font) {
-            let text_settings = options.sdf_settings_uniform(&text_renderer.fonts);
+        let (settings_buffer, settings_bind_group) = if text_renderer.font_uses_sdf(data.font) {
+            let text_settings = data.sdf_settings_uniform();
             let settings_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("kaku sdf text settings uniform buffer"),
                 contents: bytemuck::cast_slice(&[text_settings]),
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
             });
 
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
+            let settings_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("kaku sdf text settings uniform bind group"),
                 layout: &text_renderer.sdf_settings_layout,
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
                     resource: settings_buffer.as_entire_binding(),
                 }],
-            })
+            });
+
+            (settings_buffer, settings_bind_group)
         } else {
-            let text_settings = options.settings_uniform();
+            let text_settings = data.settings_uniform();
 
             let settings_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("kaku text settings uniform buffer"),
@@ -214,20 +245,23 @@ impl Text {
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
             });
 
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
+            let settings_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("kaku text settings uniform bind group"),
                 layout: &text_renderer.settings_layout,
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
                     resource: settings_buffer.as_entire_binding(),
                 }],
-            })
+            });
+
+            (settings_buffer, settings_bind_group)
         };
 
         Self {
-            options,
+            data,
             instance_buffer,
             settings_bind_group,
+            settings_buffer,
             instance_capacity: instances.len(),
         }
     }
@@ -236,16 +270,16 @@ impl Text {
     ///
     /// This is faster than recreating the object because it may reuse its existing gpu buffer
     /// instead of recreating it.
-    pub fn change_text(
+    pub fn set_text(
         &mut self,
         text: String,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         text_renderer: &TextRenderer,
     ) {
-        text_renderer.update_char_textures(&text, self.options.font, device, queue);
-        self.options.text = text;
-        let new_instances = text_renderer.create_text_instances(&self.options);
+        text_renderer.update_char_textures(&text, self.data.font, device, queue);
+        self.data.text = text;
+        let new_instances = text_renderer.create_text_instances(&self.data);
 
         if new_instances.len() > self.instance_capacity {
             self.instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -262,5 +296,61 @@ impl Text {
                 bytemuck::cast_slice(&new_instances),
             );
         }
+    }
+
+    // Uploads the current settings (as described in self.data) to the settings buffer on the GPU.
+    fn update_settings_buffer(&self, queue: &wgpu::Queue) {
+        if self.data.sdf.is_some() {
+            queue.write_buffer(
+                &self.settings_buffer,
+                0,
+                bytemuck::cast_slice(&[self.data.sdf_settings_uniform()]),
+            );
+        } else {
+            queue.write_buffer(
+                &self.settings_buffer,
+                0,
+                bytemuck::cast_slice(&[self.data.settings_uniform()]),
+            );
+        }
+    }
+
+    /// Changes the color of the text.
+    pub fn set_color(&mut self, color: [f32; 4], queue: &wgpu::Queue) {
+        self.data.color = color;
+        self.update_settings_buffer(queue);
+    }
+
+    /// Changes the scale of the text.
+    pub fn set_scale(&mut self, scale: f32, queue: &wgpu::Queue) {
+        self.data.scale = scale;
+        self.update_settings_buffer(queue);
+    }
+
+    /// Sets the outline to be on with the given options. If the width is less than or equal to zero, it turns
+    /// the outline off.
+    ///
+    /// This does nothing if the font is not rendered with sdf.
+    pub fn set_outline(&mut self, color: [f32; 4], width: f32, queue: &wgpu::Queue) {
+        if let Some(sdf) = &mut self.data.sdf {
+            if width > 0. {
+                sdf.outline = Some(Outline { color, width });
+            } else {
+                sdf.outline = None;
+            }
+        }
+
+        self.update_settings_buffer(queue);
+    }
+
+    /// Removes the outline from the text, if there was one.
+    ///
+    /// This does nothing if the font is not rendered with sdf.
+    pub fn set_no_outline(&mut self, queue: &wgpu::Queue) {
+        if let Some(sdf) = &mut self.data.sdf {
+            sdf.outline = None;
+        }
+
+        self.update_settings_buffer(queue)
     }
 }

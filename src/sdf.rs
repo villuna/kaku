@@ -14,9 +14,8 @@ pub struct SdfSettings {
     /// size of effects such as outlines, glow, shadows etc. A higher radius means you can create
     /// larger outlines, but will use more memory on the GPU.
     pub radius: f32,
-
     // Stuff to do in the future:
-    
+
     // How much to scale up the texture when generating the sdf texture
     // A bigger scale will lead to higher quality glyphs that can be scaled up but will lead to
     // pub prescale: f32,
