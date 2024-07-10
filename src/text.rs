@@ -209,7 +209,7 @@ impl Text {
         queue: &wgpu::Queue,
         text_renderer: &mut TextRenderer,
     ) -> Self {
-        text_renderer.update_char_textures(&data.text, data.font, device, queue);
+        text_renderer.generate_char_textures(data.text.chars(), data.font, device, queue);
         let instances = text_renderer.create_text_instances(&data);
 
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -277,7 +277,7 @@ impl Text {
         queue: &wgpu::Queue,
         text_renderer: &mut TextRenderer,
     ) {
-        text_renderer.update_char_textures(&text, self.data.font, device, queue);
+        text_renderer.generate_char_textures(text.chars(), self.data.font, device, queue);
         self.data.text = text;
         let new_instances = text_renderer.create_text_instances(&self.data);
 

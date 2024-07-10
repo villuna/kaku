@@ -3,8 +3,7 @@
 //!
 //! This crate aims to provide a general and easy to use API for rendering text using [wgpu], mainly
 //! targeting video games. It can render text normally (using raster images), or with signed
-//! distance fields, which allows for performant scaling and outlining, but takes longer when
-//! initially creating textures for each character.
+//! distance fields, which allows for performant scaling and outlining.
 //!
 //! # Usage
 //!
@@ -14,18 +13,28 @@
 //! ```rust
 //! let mut text_renderer = TextRenderer::new(&device, &surface_config);
 //! let font = ab_glyph::FontRef::try_from_slice(include_bytes!("FiraSans-Regular.ttf"))?;
-//! let font = text_renderer.load_font_sdf(font, 45., SdfSettings { radius: 15. });
+//! let font = text_renderer.load_font_with_sdf(font, 45., SdfSettings { radius: 15. });
 //!
 //! let text = TextBuilder::new("Hello, world!", font, [100., 100.])
 //!     .outlined([1.; 4], 10.)
 //!     .build(&device, &queue, &mut text_renderer);
 //! ```
 //!
+//! If a font is loaded with [TextRenderer::load_font], it will not use sdf, but if it is loaded
+//! with [TextRenderer::load_font_with_sdf], it will.
+//!
 //! Then, you can draw this text object very simply during a render pass:
 //!
 //! ```rust
 //! text_renderer.draw(&mut render_pass, &text);
 //! ```
+//!
+//! # Performance
+//!
+//! Calculating the signed distance field for a character takes a small but not-insignificant
+//! amount of time. This will only happen once for each character in a font, and can be done ahead
+//! of time using [TextRenderer::generate_char_textures], but is still a cost. If you don't need
+//! the features provided by sdf rendering, you should use non-sdf rendering instead.
 
 mod sdf;
 mod text;
@@ -583,17 +592,17 @@ impl TextRenderer {
     /// For example, if you are making a game with a score display that might change every frame,
     /// you might want to cache all the characters from '0' to '9' beforehand to save this from
     /// happening between frames.
-    pub fn update_char_textures(
+    pub fn generate_char_textures(
         &mut self,
-        text: &str,
+        chars: impl Iterator<Item = char>,
         font: FontId,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) {
         let char_data = {
             let font_data = self.fonts.get(font);
-            let new_characters = text
-                .chars()
+            let new_characters = 
+                chars
                 .filter(|c| !font_data.char_cache.contains_key(c))
                 .unique()
                 .collect_vec();
