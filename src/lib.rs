@@ -233,6 +233,7 @@ fn create_text_pipeline(
     label: &str,
     layout: &wgpu::PipelineLayout,
     render_format: wgpu::TextureFormat,
+    samples: u32,
     shader: &wgpu::ShaderModule,
     device: &wgpu::Device,
 ) -> wgpu::RenderPipeline {
@@ -261,7 +262,7 @@ fn create_text_pipeline(
         },
         depth_stencil: None,
         multisample: wgpu::MultisampleState {
-            count: 1,
+            count: samples,
             mask: !0,
             alpha_to_coverage_enabled: false,
         },
@@ -290,7 +291,7 @@ pub struct TextRenderer {
 
 impl TextRenderer {
     /// Creates a new TextRenderer with no fonts loaded
-    pub fn new(device: &wgpu::Device, target_config: &wgpu::SurfaceConfiguration) -> Self {
+    pub fn new(device: &wgpu::Device, target_config: &wgpu::SurfaceConfiguration, msaa_samples: u32) -> Self {
         // Texture bind group layout to use when creating cached char textures
         let char_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -401,6 +402,7 @@ impl TextRenderer {
             "kaku basic text render pipeline",
             &basic_pipeline_layout,
             target_config.format,
+            msaa_samples,
             &basic_shader,
             device,
         );
@@ -422,6 +424,7 @@ impl TextRenderer {
             "kaku sdf text render pipeline",
             &sdf_pipeline_layout,
             target_config.format,
+            msaa_samples,
             &sdf_shader,
             device,
         );
@@ -433,6 +436,7 @@ impl TextRenderer {
             "kaku sdf text outline render pipeline",
             &sdf_pipeline_layout,
             target_config.format,
+            msaa_samples,
             &outline_shader,
             device,
         );

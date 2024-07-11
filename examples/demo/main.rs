@@ -78,7 +78,7 @@ impl BasicTextAppInner {
 
         // To use kaku, you first need to create a TextRenderer. This holds onto important data on
         // the GPU that we need to use for rendering.
-        let mut text_renderer = TextRenderer::new(&renderer.device, &renderer.config);
+        let mut text_renderer = TextRenderer::new(&renderer.device, &renderer.config, 1);
         let fira_sans = FontArc::new(
             FontRef::try_from_slice(include_bytes!("../fonts/FiraSans-Regular.ttf")).unwrap(),
         );
