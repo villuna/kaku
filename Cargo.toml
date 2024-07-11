@@ -9,6 +9,7 @@ license = "MIT"
 authors = ["Luna Borella <ulfrthewolf at gmail dot com>"]
 keywords = ["graphics", "text", "wgpu"]
 categories = ["graphics", "rendering"]
+exclude = ["/examples", "/images"]
 
 [dependencies]
 ab_glyph = "0.2.26"
