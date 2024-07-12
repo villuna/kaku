@@ -27,6 +27,7 @@ pub(crate) struct TextData {
     pub(crate) position: [f32; 2],
     pub(crate) color: [f32; 4],
     pub(crate) scale: f32,
+    pub(crate) halign: HorizontalAlign,
 
     pub(crate) sdf: Option<SdfTextData>,
 }
@@ -60,15 +61,24 @@ impl TextData {
     }
 }
 
+#[derive(Copy, Clone, Debug, Default)]
+pub enum HorizontalAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
 /// A builder for a [Text] struct.
 #[derive(Debug, Clone)]
 pub struct TextBuilder {
-    pub(crate) text: String,
-    pub(crate) font: FontId,
-    pub(crate) position: [f32; 2],
-    pub(crate) outline: Option<Outline>,
-    pub(crate) color: [f32; 4],
-    pub(crate) scale: f32,
+    text: String,
+    font: FontId,
+    position: [f32; 2],
+    outline: Option<Outline>,
+    color: [f32; 4],
+    scale: f32,
+    halign: HorizontalAlign,
 }
 
 impl TextBuilder {
@@ -82,6 +92,7 @@ impl TextBuilder {
             outline: None,
             color: [0., 0., 0., 1.],
             scale: 1.,
+            halign: Default::default(),
         }
     }
 
@@ -99,6 +110,7 @@ impl TextBuilder {
             position: self.position,
             color: self.color,
             scale: self.scale,
+            halign: self.halign,
 
             sdf: text_renderer.font_uses_sdf(self.font).then(|| SdfTextData {
                 radius: text_renderer
@@ -128,6 +140,16 @@ impl TextBuilder {
     /// Sets the position of the text on the screen, in pixel coordinates.
     pub fn position(&mut self, position: [f32; 2]) -> &mut Self {
         self.position = position;
+        self
+    }
+
+    /// Sets the horizontal alignment of the text.
+    ///
+    /// Left will place the left-hand side of the text at the text's position.
+    /// Right will place the right-hand side of the text at the text's position.
+    /// Centre will place the middle of the text at the text's position.
+    pub fn horizontal_align(&mut self, halign: HorizontalAlign) -> &mut Self {
+        self.halign = halign;
         self
     }
 

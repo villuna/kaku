@@ -19,6 +19,9 @@ use winit::{
     window::Window,
 };
 
+const WINDOW_WIDTH: u32 = 1600;
+const WINDOW_HEIGHT: u32 = 700;
+
 use kaku::{SdfSettings, Text, TextBuilder, TextRenderer};
 
 fn hsva_to_rgba(mut h: f32, mut s: f32, mut v: f32, a: f32) -> [f32; 4] {
@@ -230,7 +233,7 @@ impl ApplicationHandler for BasicTextApp {
         if self.inner.is_none() {
             let attributes = Window::default_attributes()
                 .with_title("basic text example")
-                .with_inner_size(PhysicalSize::new(1400, 600));
+                .with_inner_size(PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
 
             let window = event_loop.create_window(attributes).unwrap();
             self.inner = Some(BasicTextAppInner::new(Arc::new(window)));

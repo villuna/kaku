@@ -39,7 +39,7 @@
 mod sdf;
 mod text;
 
-pub use text::{Text, TextBuilder};
+pub use text::{Text, TextBuilder, HorizontalAlign};
 
 use image::GrayImage;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -559,7 +559,7 @@ impl TextRenderer {
         let char_cache = &self.fonts.get(text.font).char_cache;
         let scale = text.scale;
 
-        let instances: Vec<CharacterInstance> = text
+        let mut instances: Vec<CharacterInstance> = text
             .text
             .chars()
             .filter_map(|c| {
@@ -582,6 +582,19 @@ impl TextRenderer {
                 result
             })
             .collect_vec();
+
+        // Apply alignment
+        let text_width = position[0];
+
+        let offset = match text.halign {
+            HorizontalAlign::Left => 0.,
+            HorizontalAlign::Right => -text_width,
+            HorizontalAlign::Center => -text_width / 2.,
+        };
+
+        for instance in &mut instances {
+            instance.position[0] += offset;
+        }
 
         instances
     }
