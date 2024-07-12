@@ -22,7 +22,7 @@ use winit::{
 const WINDOW_WIDTH: u32 = 1600;
 const WINDOW_HEIGHT: u32 = 700;
 
-use kaku::{SdfSettings, Text, TextBuilder, TextRenderer};
+use kaku::{SdfSettings, Text, TextBuilder, TextRenderer, TextRendererBuilder};
 
 fn hsva_to_rgba(mut h: f32, mut s: f32, mut v: f32, a: f32) -> [f32; 4] {
     s = s.clamp(0., 1.);
@@ -81,7 +81,10 @@ impl BasicTextAppInner {
 
         // To use kaku, you first need to create a TextRenderer. This holds onto important data on
         // the GPU that we need to use for rendering.
-        let mut text_renderer = TextRenderer::new(&renderer.device, &renderer.config, 1);
+        let format = renderer.config.format;
+        let size = (renderer.config.width, renderer.config.height);
+        let mut text_renderer = TextRendererBuilder::new(format, size).build(&renderer.device);
+
         let fira_sans = FontArc::new(
             FontRef::try_from_slice(include_bytes!("../fonts/FiraSans-Regular.ttf")).unwrap(),
         );

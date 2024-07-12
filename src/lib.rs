@@ -7,11 +7,13 @@
 //!
 //! # Usage
 //!
-//! First, create a [TextRenderer]. Then, load an [ab_glyph] font using [TextRenderer::load_font].
-//! Then, create a drawable [Text] object using a [TextBuilder]:
+//! First, create a [TextRenderer] using a [TextRendererBuilder]. Then, load an [ab_glyph] font using
+//! [TextRenderer::load_font]. Then, create a drawable [Text] object using a [TextBuilder]:
 //!
 //! ```rust
-//! let mut text_renderer = TextRenderer::new(&device, &surface_config);
+//! let mut text_renderer = 
+//!     TextRendererBuilder::new(target_format, target_size).build(&device);
+//!     
 //! let font = ab_glyph::FontRef::try_from_slice(include_bytes!("FiraSans-Regular.ttf"))?;
 //! let font = text_renderer.load_font_with_sdf(font, 45., SdfSettings { radius: 15. });
 //!
@@ -39,7 +41,7 @@
 mod sdf;
 mod text;
 
-pub use text::{Text, TextBuilder, HorizontalAlign};
+pub use text::{HorizontalAlign, Text, TextBuilder};
 
 use image::GrayImage;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -54,7 +56,9 @@ use itertools::Itertools;
 use log::info;
 use sdf::create_sdf_texture;
 use text::{SdfSettingsUniform, SettingsUniform};
-use wgpu::{include_wgsl, util::DeviceExt, TextureViewDescriptor};
+use wgpu::{
+    include_wgsl, util::DeviceExt, DepthStencilState, TextureFormat, TextureViewDescriptor,
+};
 
 type HashMap<K, V> = AHashMap<K, V>;
 
@@ -84,9 +88,10 @@ type CharacterCache = HashMap<char, Character>;
 /// back one of these IDs referencing that font.
 ///
 /// Most functions in the TextRenderer will panic if you provide a FontId that is invalid.
-#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy)]
+#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy, Ord, PartialOrd)]
 pub struct FontId(usize);
 
+#[derive(Debug)]
 struct FontData {
     font: FontArc,
     size: f32,
@@ -119,7 +124,7 @@ impl FontData {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct FontMap {
     fonts: Vec<FontData>,
 }
@@ -145,7 +150,9 @@ impl FontMap {
     }
 
     fn get_mut(&mut self, font: FontId) -> &mut FontData {
-        self.fonts.get_mut(font.0).expect("Font not found in renderer!") 
+        self.fonts
+            .get_mut(font.0)
+            .expect("Font not found in renderer!")
     }
 }
 
@@ -232,12 +239,66 @@ fn character_instance_layout() -> wgpu::VertexBufferLayout<'static> {
     }
 }
 
+/// A builder for a [TextRenderer] struct.
+#[derive(Clone, Debug)]
+pub struct TextRendererBuilder {
+    target_format: wgpu::TextureFormat,
+    target_size: (u32, u32),
+    msaa_samples: u32,
+    depth_format: Option<TextureFormat>,
+}
+
+impl TextRendererBuilder {
+    /// Creates a new TextRendererBuilder.
+    ///
+    /// This function takes in the format of the target surface that the [TextRenderer] will draw
+    /// to, and the size of the target surface.
+    pub fn new(target_format: wgpu::TextureFormat, target_size: (u32, u32)) -> Self {
+        Self {
+            target_format,
+            target_size,
+            msaa_samples: 1,
+            depth_format: None,
+        }
+    }
+
+    /// Sets the number of samples to use for multisampling. The default is 1 (no multisampling).
+    ///
+    /// Text rendered this way doesn't really benefit from multisampling, so this won't make the
+    /// text look any better. Instead, this option is used if you want to draw on a render pass
+    /// that already uses multisampling.
+    pub fn with_msaa_sample_count(mut self, samples: u32) -> Self {
+        self.msaa_samples = samples;
+        self
+    }
+
+    /// Sets the format of the depth buffer.
+    ///
+    /// If your render pass uses a depth buffer, you will want to set this option.
+    pub fn with_depth(mut self, depth_format: TextureFormat) -> Self {
+        self.depth_format = Some(depth_format);
+        self
+    }
+
+    /// Creates a new [TextRenderer] from the current configuration.
+    pub fn build(self, device: &wgpu::Device) -> TextRenderer {
+        TextRenderer::new(
+            device,
+            self.target_format,
+            self.target_size,
+            self.msaa_samples,
+            self.depth_format,
+        )
+    }
+}
+
 fn create_text_pipeline(
     label: &str,
     layout: &wgpu::PipelineLayout,
     render_format: wgpu::TextureFormat,
     samples: u32,
     shader: &wgpu::ShaderModule,
+    depth_format: Option<TextureFormat>,
     device: &wgpu::Device,
 ) -> wgpu::RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -263,7 +324,15 @@ fn create_text_pipeline(
             topology: wgpu::PrimitiveTopology::TriangleStrip,
             ..Default::default()
         },
-        depth_stencil: None,
+        depth_stencil: depth_format.map(|format| {
+            DepthStencilState {
+                format,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }
+        }),
         multisample: wgpu::MultisampleState {
             count: samples,
             mask: !0,
@@ -273,6 +342,7 @@ fn create_text_pipeline(
     })
 }
 
+#[derive(Debug)]
 /// The main struct that handles text rendering to the screen. Use this struct to load fonts and
 /// draw text during a render pass.
 pub struct TextRenderer {
@@ -293,8 +363,13 @@ pub struct TextRenderer {
 }
 
 impl TextRenderer {
-    /// Creates a new TextRenderer with no fonts loaded
-    pub fn new(device: &wgpu::Device, target_config: &wgpu::SurfaceConfiguration, msaa_samples: u32) -> Self {
+    fn new(
+        device: &wgpu::Device,
+        target_format: wgpu::TextureFormat,
+        target_size: (u32, u32),
+        msaa_samples: u32,
+        depth_stencil_state: Option<TextureFormat>,
+    ) -> Self {
         // Texture bind group layout to use when creating cached char textures
         let char_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -337,7 +412,7 @@ impl TextRenderer {
                 ]
             });
 
-        let screen_uniform = ScreenUniform::new((target_config.width, target_config.height));
+        let screen_uniform = ScreenUniform::new(target_size);
 
         let screen_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("kaku screen uniform buffer"),
@@ -404,9 +479,10 @@ impl TextRenderer {
         let basic_pipeline = create_text_pipeline(
             "kaku basic text render pipeline",
             &basic_pipeline_layout,
-            target_config.format,
+            target_format,
             msaa_samples,
             &basic_shader,
+            depth_stencil_state.clone(),
             device,
         );
 
@@ -426,9 +502,10 @@ impl TextRenderer {
         let sdf_pipeline = create_text_pipeline(
             "kaku sdf text render pipeline",
             &sdf_pipeline_layout,
-            target_config.format,
+            target_format,
             msaa_samples,
             &sdf_shader,
+            depth_stencil_state.clone(),
             device,
         );
 
@@ -438,9 +515,10 @@ impl TextRenderer {
         let outline_pipeline = create_text_pipeline(
             "kaku sdf text outline render pipeline",
             &sdf_pipeline_layout,
-            target_config.format,
+            target_format,
             msaa_samples,
             &outline_shader,
+            depth_stencil_state,
             device,
         );
 
@@ -621,8 +699,7 @@ impl TextRenderer {
     ) {
         let char_data = {
             let font_data = self.fonts.get(font);
-            let new_characters = 
-                chars
+            let new_characters = chars
                 .filter(|c| !font_data.char_cache.contains_key(c))
                 .unique()
                 .collect_vec();
@@ -631,13 +708,18 @@ impl TextRenderer {
             let scale = font_data.scale;
             let sdf = font_data.sdf_settings.as_ref();
 
-            new_characters.into_par_iter().map(|c| {
-                let data = match sdf {
-                    None => self.create_char_texture(c, font, scale, device, queue),
-                    Some(sdf) => self.create_char_texture_sdf(c, font, scale, sdf, device, queue),
-                };
-                (c, data)
-            }).collect::<Vec<_>>()
+            new_characters
+                .into_par_iter()
+                .map(|c| {
+                    let data = match sdf {
+                        None => self.create_char_texture(c, font, scale, device, queue),
+                        Some(sdf) => {
+                            self.create_char_texture_sdf(c, font, scale, sdf, device, queue)
+                        }
+                    };
+                    (c, data)
+                })
+                .collect::<Vec<_>>()
         };
 
         self.fonts.get_mut(font).char_cache.extend(char_data);
