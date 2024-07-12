@@ -1,6 +1,6 @@
 # Kaku
 
-A text rendering crate for rust+wgpu, with the ability to use signed distance fields.
+A text rendering crate for rust+wgpu, with the ability to use signed distance fields. (It's still in a WIP state and is not on crates.io, yet).
 
 This crate was originally designed with the intent of allowing fast frame-by-frame rendering of outlined text for a video game I'm working on.
 
