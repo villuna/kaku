@@ -357,7 +357,7 @@ impl TextRenderer {
             label: Some("kaku text settings uniform bind group layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -372,7 +372,7 @@ impl TextRenderer {
                 label: Some("kaku sdf text settings uniform bind group layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -555,7 +555,7 @@ impl TextRenderer {
     }
 
     fn create_text_instances(&self, text: &TextData) -> Vec<CharacterInstance> {
-        let mut position = text.position;
+        let mut position = [0., 0.];
         let char_cache = &self.fonts.get(text.font).char_cache;
         let scale = text.scale;
 

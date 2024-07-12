@@ -98,16 +98,18 @@ impl BasicTextAppInner {
         let hello_world_sdf = builder.build(&renderer.device, &renderer.queue, &mut text_renderer);
 
         let outline_color = hsva_to_rgba(0.0, 1.0, 1.0, 1.0);
-        builder.position([50., 320.]);
+        builder.position([50., 340.]);
         builder.color([1.; 4]);
         builder.outlined(outline_color, 15.);
-        let hello_world_outline = builder.build(&renderer.device, &renderer.queue, &mut text_renderer);
+        let hello_world_outline =
+            builder.build(&renderer.device, &renderer.queue, &mut text_renderer);
 
         builder.position([50., 520.]);
         builder.scale(2.);
         builder.color([0., 0., 0., 1.]);
         builder.no_outline();
-        let hello_world_scaled = builder.build(&renderer.device, &renderer.queue, &mut text_renderer);
+        let hello_world_scaled =
+            builder.build(&renderer.device, &renderer.queue, &mut text_renderer);
 
         // Or you can use the builder with chained methods like this for a one-off
         let fps_text = TextBuilder::new("fps: ", fira_sans_sdf, [40., 40.])
@@ -153,6 +155,13 @@ impl BasicTextAppInner {
         let outline_width = 10. * ((total_elapsed * std::f32::consts::PI).cos() + 1.) / 2. + 5.;
         self.hello_world_outline
             .set_outline(outline_color, outline_width, &self.renderer.queue);
+        self.hello_world_outline.set_position(
+            [
+                50. + 5. * (total_elapsed * 3.).cos(),
+                340. + 5. * (total_elapsed * 3.).sin(),
+            ],
+            &self.renderer.queue,
+        );
     }
 
     fn render(&mut self) -> Result<(), SurfaceError> {

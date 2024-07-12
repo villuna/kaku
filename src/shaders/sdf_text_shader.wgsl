@@ -3,39 +3,40 @@ struct VertexInput {
 };
 
 struct CharacterInstance {
-    @location(1) position: vec2<f32>,
+    @location(1) char_position: vec2<f32>,
     @location(2) size: vec2<f32>,
 };
 
 struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
+    @builtin(position) vertex_position: vec4<f32>,
     @location(0) tex_coord: vec2<f32>,
+};
+
+struct SdfTextSettings {
+    @location(0) colour: vec4<f32>,
+    @location(1) outline_colour: vec4<f32>,
+    @location(2) text_position: vec2<f32>,
+    @location(3) outline_width: f32,
+    @location(4) sdf_radius: f32,
+    @location(5) image_scale: f32,
 };
 
 // Projection matrix that allows us to draw in pixel coords
 @group(0) @binding(0)
 var<uniform> screen: mat4x4<f32>;
 
+@group(2) @binding(0)
+var<uniform> settings: SdfTextSettings;
+
 @vertex
 fn vs_main(vertex: VertexInput, instance: CharacterInstance) -> VertexOutput {
     var out: VertexOutput;
 
-    var position = instance.position + vertex.tex_coord * instance.size;
-    out.position = screen * vec4<f32>(position, 0.0, 1.0);
+    var position = instance.char_position + settings.text_position + vertex.tex_coord * instance.size;
+    out.vertex_position = screen * vec4<f32>(position, 0.0, 1.0);
     out.tex_coord = vertex.tex_coord;
     return out;
 }
-
-struct SdfTextSettings {
-    @location(0) colour: vec4<f32>,
-    @location(1) outline_colour: vec4<f32>,
-    @location(2) outline_width: f32,
-    @location(3) sdf_radius: f32,
-    @location(4) image_scale: f32,
-};
-
-@group(2) @binding(0)
-var<uniform> settings: SdfTextSettings;
 
 @group(1) @binding(0)
 var texture: texture_2d<f32>;

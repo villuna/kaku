@@ -33,7 +33,11 @@ pub(crate) struct TextData {
 
 impl TextData {
     fn settings_uniform(&self) -> SettingsUniform {
-        SettingsUniform { color: self.color }
+        SettingsUniform {
+            color: self.color,
+            text_position: self.position,
+            _padding: [0.; 2],
+        }
     }
 
     fn sdf_settings_uniform(&self) -> SdfSettingsUniform {
@@ -47,10 +51,11 @@ impl TextData {
         SdfSettingsUniform {
             color: self.color,
             outline_color,
+            text_position: self.position,
             outline_width,
             sdf_radius,
             image_scale: self.scale,
-            _padding: 0.,
+            _padding: [0.; 3],
         }
     }
 }
@@ -176,17 +181,20 @@ impl TextBuilder {
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct SettingsUniform {
     color: [f32; 4],
+    text_position: [f32; 2],
+    _padding: [f32; 2],
 }
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct SdfSettingsUniform {
-    pub(crate) color: [f32; 4],
-    pub(crate) outline_color: [f32; 4],
-    pub(crate) outline_width: f32,
-    pub(crate) sdf_radius: f32,
-    pub(crate) image_scale: f32,
-    _padding: f32,
+    color: [f32; 4],
+    outline_color: [f32; 4],
+    text_position: [f32; 2],
+    outline_width: f32,
+    sdf_radius: f32,
+    image_scale: f32,
+    _padding: [f32; 3],
 }
 
 /// A piece of text that can be rendered to the screen. Create one of these using a [TextBuilder],
@@ -324,6 +332,12 @@ impl Text {
     /// Changes the scale of the text.
     pub fn set_scale(&mut self, scale: f32, queue: &wgpu::Queue) {
         self.data.scale = scale;
+        self.update_settings_buffer(queue);
+    }
+
+    /// Changes the position of the text on the screen
+    pub fn set_position(&mut self, position: [f32; 2], queue: &wgpu::Queue) {
+        self.data.position = position;
         self.update_settings_buffer(queue);
     }
 
