@@ -61,11 +61,17 @@ impl TextData {
     }
 }
 
+/// Different settings for horizontal text alignment
+///
+/// These control where the text drawn is with respect to it's position
 #[derive(Copy, Clone, Debug, Default)]
 pub enum HorizontalAlign {
+    /// Text is drawn starting at its position.
     #[default]
     Left,
+    /// Text is drawn with the position in the centre of the string.
     Center,
+    /// Text is drawn ending at its position.
     Right,
 }
 
@@ -78,6 +84,7 @@ pub struct TextBuilder {
     outline: Option<Outline>,
     color: [f32; 4],
     scale: f32,
+    custom_font_size: Option<f32>,
     halign: HorizontalAlign,
 }
 
@@ -92,6 +99,7 @@ impl TextBuilder {
             outline: None,
             color: [0., 0., 0., 1.],
             scale: 1.,
+            custom_font_size: None,
             halign: Default::default(),
         }
     }
@@ -104,12 +112,20 @@ impl TextBuilder {
         queue: &wgpu::Queue,
         text_renderer: &mut TextRenderer,
     ) -> Text {
+        let scale = match self.custom_font_size {
+            None => self.scale,
+            Some(size) => {
+                let font_size = text_renderer.fonts.get(self.font).size;
+                (size / font_size) * self.scale
+            }
+        };
+
         let data = TextData {
             text: self.text.clone(),
             font: self.font,
             position: self.position,
             color: self.color,
-            scale: self.scale,
+            scale,
             halign: self.halign,
 
             sdf: text_renderer.font_uses_sdf(self.font).then(|| SdfTextData {
@@ -195,6 +211,17 @@ impl TextBuilder {
     /// artefacts at high scale.
     pub fn scale(&mut self, scale: f32) -> &mut Self {
         self.scale = scale;
+        self
+    }
+
+    /// Adjusts the text scale so it's drawn at a certain size.
+    ///
+    /// If the argument is None, it resets the text to the original size as determined by the font.
+    ///
+    /// Fonts are loaded with a certain fixed size, but this function allows you to scale the text
+    /// to a different size after the fact.
+    pub fn font_size(&mut self, size: Option<f32>) -> &mut Self {
+        self.custom_font_size = size;
         self
     }
 }

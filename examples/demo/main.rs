@@ -108,7 +108,7 @@ impl BasicTextAppInner {
             builder.build(&renderer.device, &renderer.queue, &mut text_renderer);
 
         builder.position([50., 520.]);
-        builder.scale(2.);
+        builder.font_size(Some(120.));
         builder.color([0., 0., 0., 1.]);
         builder.no_outline();
         let hello_world_scaled =

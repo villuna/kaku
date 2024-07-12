@@ -89,25 +89,30 @@ pub struct FontId(usize);
 
 struct FontData {
     font: FontArc,
+    size: f32,
     scale: PxScale,
     char_cache: CharacterCache,
     sdf_settings: Option<SdfSettings>,
 }
 
 impl FontData {
-    fn new(font: FontArc, scale: PxScale) -> Self {
+    fn new(font: FontArc, size: f32) -> Self {
+        let scale = font.pt_to_px_scale(size).unwrap();
         Self {
             font,
             scale,
+            size,
             sdf_settings: None,
             char_cache: Default::default(),
         }
     }
 
-    fn new_with_sdf(font: FontArc, scale: PxScale, sdf_settings: SdfSettings) -> Self {
+    fn new_with_sdf(font: FontArc, size: f32, sdf_settings: SdfSettings) -> Self {
+        let scale = font.pt_to_px_scale(size).unwrap();
         Self {
             font,
             scale,
+            size,
             sdf_settings: Some(sdf_settings),
             char_cache: Default::default(),
         }
@@ -123,17 +128,15 @@ impl FontMap {
     /// Load a font into the map
     fn load(&mut self, font: FontArc, size: f32) -> FontId {
         let id = self.fonts.len();
-        let scale = font.pt_to_px_scale(size).unwrap();
-        self.fonts.push(FontData::new(font, scale));
+        self.fonts.push(FontData::new(font, size));
         FontId(id)
     }
 
     /// Load a font into the map with sdf rendering enabled
     fn load_with_sdf(&mut self, font: FontArc, size: f32, sdf_settings: SdfSettings) -> FontId {
         let id = self.fonts.len();
-        let scale = font.pt_to_px_scale(size).unwrap();
         self.fonts
-            .push(FontData::new_with_sdf(font, scale, sdf_settings));
+            .push(FontData::new_with_sdf(font, size, sdf_settings));
         FontId(id)
     }
 

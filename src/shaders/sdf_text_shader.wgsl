@@ -53,7 +53,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let value = textureSample(texture, texture_sampler, input.tex_coord).r;
     let distance = scale_distance(value, settings.sdf_radius);
 
-    let aa_thresh = min(1.0, 1.0 / settings.image_scale);
+    let aa_thresh = 1.0 / settings.image_scale;
 
     let alpha = smoothstep(aa_thresh, -aa_thresh, distance);
     return vec4<f32>(settings.colour.rgb, settings.colour.a * alpha);
