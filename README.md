@@ -14,7 +14,7 @@ This crate was originally designed with the intent of allowing fast frame-by-fra
 
 Without going into details, signed distance fields are a way of representing a shape (such as a character in a font) in a way that allows for high quality upscaling, reducing memory usage. It also allows you to render certain effects such as outlines in a way that is very performant.
 
-The major downside to SDF rendering is that it takes some time to calculate the field, so creating textures for a string of text takes longer with this approach than with simple texture-based text rendering. So, this crate provides both, in case you don't need anything that SDF rendering provides.
+While SDF rendering has many benefits, it also takes a little bit longer to generate the textures for each character than with basic texture-based rendering. So this crate provides both methods of text rendering.
 
 ## Example
 

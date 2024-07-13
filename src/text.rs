@@ -63,13 +63,13 @@ impl TextData {
 
 /// Different settings for horizontal text alignment
 ///
-/// These control where the text drawn is with respect to it's position
+/// These control where the text drawn is with respect to its position
 #[derive(Copy, Clone, Debug, Default)]
 pub enum HorizontalAlign {
     /// Text is drawn starting at its position.
     #[default]
     Left,
-    /// Text is drawn with the position in the centre of the string.
+    /// Text is drawn with the position in the center of the string.
     Center,
     /// Text is drawn ending at its position.
     Right,
@@ -246,8 +246,10 @@ pub(crate) struct SdfSettingsUniform {
     _padding: [f32; 3],
 }
 
-/// A piece of text that can be rendered to the screen. Create one of these using a [TextBuilder],
-/// then render it to a wgpu render pass using [TextRenderer::draw_text].
+/// A piece of text that can be rendered to the screen.
+///
+/// Create one of these using a [TextBuilder], then render it to a wgpu render pass using
+/// [TextRenderer::draw_text].
 #[derive(Debug)]
 pub struct Text {
     pub(crate) data: TextData,

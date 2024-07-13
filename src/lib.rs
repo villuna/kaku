@@ -7,8 +7,9 @@
 //!
 //! # Usage
 //!
-//! First, create a [TextRenderer] using a [TextRendererBuilder]. Then, load an [ab_glyph] font using
-//! [TextRenderer::load_font]. Then, create a drawable [Text] object using a [TextBuilder]:
+//! Here is an example of how to use the crate. You first need to create a [TextRenderer] struct,
+//! then load a font using [ab_glyph], then you can create a [Text] object, which is the thing that
+//! can be drawn.
 //!
 //! ```rust
 //! let mut text_renderer = 
@@ -22,10 +23,7 @@
 //!     .build(&device, &queue, &mut text_renderer);
 //! ```
 //!
-//! If a font is loaded with [TextRenderer::load_font], it will not use sdf, but if it is loaded
-//! with [TextRenderer::load_font_with_sdf], it will.
-//!
-//! Then, you can draw this text object very simply during a render pass:
+//! You can then draw this text object during a render pass like so:
 //!
 //! ```rust
 //! text_renderer.draw(&mut render_pass, &text);
@@ -345,6 +343,8 @@ fn create_text_pipeline(
 #[derive(Debug)]
 /// The main struct that handles text rendering to the screen. Use this struct to load fonts and
 /// draw text during a render pass.
+///
+/// Create one with a [TextRendererBuilder].
 pub struct TextRenderer {
     fonts: FontMap,
     char_bind_group_layout: wgpu::BindGroupLayout,
