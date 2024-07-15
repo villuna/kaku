@@ -1,9 +1,9 @@
 #![warn(missing_docs)]
 //! A font rendering crate for rendering text using signed distance fields.
 //!
-//! This crate aims to provide a general and easy to use API for rendering text using [wgpu], mainly
-//! targeting video games. It can render text normally (using raster images), or with signed
-//! distance fields, which allows for performant scaling and outlining.
+//! This crate aims to provide a general and easy to use API for rendering text using [wgpu].
+//! It can render text normally (using raster images), or with signed distance fields, which
+//! allows for performant scaling and outlining.
 //!
 //! # Usage
 //!
@@ -84,8 +84,6 @@ type CharacterCache = HashMap<char, Character>;
 ///
 /// When you load a font into the text renderer using [TextRenderer::load_font], it will give you
 /// back one of these IDs referencing that font.
-///
-/// Most functions in the TextRenderer will panic if you provide a FontId that is invalid.
 #[derive(Debug, Eq, PartialEq, Hash, Clone, Copy, Ord, PartialOrd)]
 pub struct FontId(usize);
 
@@ -247,7 +245,7 @@ fn character_instance_layout() -> wgpu::VertexBufferLayout<'static> {
 }
 
 /// A builder for a [TextRenderer] struct.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct TextRendererBuilder {
     target_format: wgpu::TextureFormat,
     target_size: (u32, u32),
@@ -641,7 +639,7 @@ impl TextRenderer {
         }
     }
 
-    /// Returns whether a given font was loaded with sdf enabled
+    /// Returns whether a given font was loaded with sdf enabled.
     pub fn font_uses_sdf(&self, font: FontId) -> bool {
         self.fonts.get(font).sdf_settings.is_some()
     }
@@ -697,7 +695,7 @@ impl TextRenderer {
             .collect_vec();
 
         // Apply vertical alignment to the whole text
-        
+
         let v_offset = match text.valign {
             VerticalAlignment::Baseline => 0.,
             VerticalAlignment::Top => ascent,

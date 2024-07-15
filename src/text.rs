@@ -9,19 +9,19 @@ use wgpu::util::DeviceExt;
 use crate::{FontId, TextRenderer};
 
 /// Options for a text outline.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 pub(crate) struct Outline {
     pub(crate) color: [f32; 4],
     pub(crate) width: f32,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub(crate) struct SdfTextData {
     pub(crate) radius: f32,
     pub(crate) outline: Option<Outline>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub(crate) struct TextData {
     pub(crate) text: String,
     pub(crate) font: FontId,
@@ -64,7 +64,7 @@ impl TextData {
 }
 
 /// Settings for font size.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub enum FontSize {
     /// A font's size in pt.
     Pt(f32),
@@ -88,7 +88,7 @@ impl FontSize {
 /// Settings for horizontal text alignment
 ///
 /// These control where the text drawn is with respect to its position
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, PartialOrd)]
 pub enum HorizontalAlignment {
     /// Anchors the position at the left side of the text.
     ///
@@ -127,7 +127,7 @@ impl HorizontalAlignment {
 /// Settings for vertical text alignment.
 ///
 /// See <https://freetype.org/freetype2/docs/glyphs/glyphs-3.html> for more info on font metrics.
-#[derive(Default, Copy, Clone, Debug)]
+#[derive(Default, Copy, Clone, Debug, PartialEq, PartialOrd)]
 pub enum VerticalAlignment {
     /// Anchors the position to the baseline of the text.
     ///
@@ -156,7 +156,7 @@ pub enum VerticalAlignment {
 }
 
 /// A builder for a [Text] struct.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct TextBuilder {
     text: String,
     font: FontId,
@@ -260,16 +260,12 @@ impl TextBuilder {
         self
     }
 
-    /// Adds an outline to the text, with given colour and width.
-    ///
-    /// If the width is less than or equal to zero, this just turns off the outline (same as
-    /// [TextBuilder::no_outline]).
+    /// Adds an outline to the text, with given colour and width. If the width is less than or
+    /// equal to zero, this turns off the outline.
     ///
     /// Text can only be outlined if it is drawn using sdf, so if the font is not sdf-enabled then
-    /// this won't do anything.
-    ///
-    /// The outline can only be as wide as the sdf radius of the font. If you want a wider outline,
-    /// use a wider radius (see [crate::SdfSettings]).
+    /// this won't do anything. The outline can only be as wide as the sdf radius of the font. If
+    /// you want a wider outline, use a wider radius (see [crate::SdfSettings]).
     pub fn outlined(&mut self, color: [f32; 4], width: f32) -> &mut Self {
         if width > 0. {
             self.outline = Some(Outline { color, width });
@@ -305,12 +301,15 @@ impl TextBuilder {
         self
     }
 
-    /// Adjusts the text scale so it's drawn at a certain size.
+    /// Adjusts the text scale so that it is drawn at a certain font size. If the argument is None,
+    /// it resets the text to the default size of the font (the size it was loaded into the text
+    /// renderer with).
     ///
-    /// If the argument is None, it resets the text to the original size as determined by the font.
+    /// If the font is not SDF-enabled, then upscaling will be done with bilinear filtering,
+    /// and will not look very good.
     ///
-    /// Fonts are loaded with a certain fixed size, but this function allows you to scale the text
-    /// to a different size after the fact.
+    /// Note that this is multiplicative with the scale option; e.g. if the font size is set to be
+    /// 40pt and the scale is set to 2.0, then the font will be drawn at 80pt size.
     pub fn font_size(&mut self, size: Option<FontSize>) -> &mut Self {
         self.custom_font_size = size;
         self
@@ -477,7 +476,7 @@ impl Text {
         self.update_settings_buffer(queue);
     }
 
-    /// Changes the position of the text on the screen
+    /// Changes the position of the text on the screen.
     pub fn set_position(&mut self, position: [f32; 2], queue: &wgpu::Queue) {
         self.data.position = position;
         self.update_settings_buffer(queue);
