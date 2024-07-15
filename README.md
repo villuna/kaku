@@ -1,5 +1,8 @@
 # Kaku
 
+[![Crates.io Version](https://img.shields.io/crates/v/kaku)](https://crates.io/crates/kaku)
+[![docs.rs](https://img.shields.io/docsrs/kaku)](https://docs.rs/kaku/latest/kaku/)
+
 A text rendering crate for rust+wgpu, with the ability to use signed distance fields.
 
 ## Features
