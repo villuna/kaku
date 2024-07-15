@@ -256,7 +256,7 @@ pub struct TextRendererBuilder {
 impl TextRendererBuilder {
     /// Creates a new TextRendererBuilder.
     ///
-    /// This function takes in the format of the target surface that the [TextRenderer] will draw
+    /// This function takes in the format of the target surface that the TextRenderer will draw
     /// to, and the size of the target surface.
     pub fn new(target_format: wgpu::TextureFormat, target_size: (u32, u32)) -> Self {
         Self {
@@ -279,13 +279,14 @@ impl TextRendererBuilder {
 
     /// Sets the format of the depth buffer.
     ///
-    /// If your render pass uses a depth buffer, you will want to set this option.
+    /// By default the renderer will only be compatible with render passes that don't use a depth
+    /// buffer. If yours does use a depth buffer, you will want to set this option.
     pub fn with_depth(mut self, depth_format: TextureFormat) -> Self {
         self.depth_format = Some(depth_format);
         self
     }
 
-    /// Creates a new [TextRenderer] from the current configuration.
+    /// Creates a new TextRenderer from the current configuration.
     pub fn build(self, device: &wgpu::Device) -> TextRenderer {
         TextRenderer::new(
             device,
@@ -560,7 +561,7 @@ impl TextRenderer {
         );
     }
 
-    /// Loads a font for use in the text renderer
+    /// Loads a font for use in the text renderer.
     pub fn load_font<F>(&mut self, font: F, size: FontSize) -> FontId
     where
         F: Font + Send + Sync + 'static,

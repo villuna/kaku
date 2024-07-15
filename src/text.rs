@@ -186,7 +186,7 @@ impl TextBuilder {
         }
     }
 
-    /// Creates a new [Text] object from the current configuration and uploads any necessary data
+    /// Creates a new Text object from the current configuration and uploads any necessary data
     /// to the GPU.
     pub fn build(
         &self,
@@ -285,13 +285,14 @@ impl TextBuilder {
         self
     }
 
-    /// Sets the colour of the text, in RGBA (values are in the range 0-1).
+    /// Sets the colour of the text, in RGBA (values are in the range 0-1). The default is solid
+    /// black.
     pub fn color(&mut self, color: [f32; 4]) -> &mut Self {
         self.color = color;
         self
     }
 
-    /// Sets the scale of the text.
+    /// Sets the scale of the text. The default is 1.0.
     ///
     /// If the font is not sdf-enabled, it will be scaled up bilinearly, and you may get
     /// pixellation/bluriness. If it is sdf-enabled, it will be cleaner but you may still get
