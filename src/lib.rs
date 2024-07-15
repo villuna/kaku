@@ -39,7 +39,7 @@
 mod sdf;
 mod text;
 
-pub use text::{HorizontalAlign, Text, TextBuilder};
+pub use text::{HorizontalAlignment, VerticalAlignment, Text, TextBuilder};
 
 use image::GrayImage;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -637,7 +637,8 @@ impl TextRenderer {
 
     fn create_text_instances(&self, text: &TextData) -> Vec<CharacterInstance> {
         let mut position = [0., 0.];
-        let char_cache = &self.fonts.get(text.font).char_cache;
+        let font = self.fonts.get(text.font);
+        let char_cache = &font.char_cache;
         let scale = text.scale;
 
         let mut instances: Vec<CharacterInstance> = text
@@ -666,15 +667,23 @@ impl TextRenderer {
 
         // Apply alignment
         let text_width = position[0];
+        let h_offset = -text_width * text.halign.proportion();
 
-        let offset = match text.halign {
-            HorizontalAlign::Left => 0.,
-            HorizontalAlign::Right => -text_width,
-            HorizontalAlign::Center => -text_width / 2.,
+        let scaled_font = font.font.as_scaled(font.scale);
+        let ascent = scaled_font.ascent();
+        let descent = scaled_font.descent();
+
+        let v_offset = match text.valign {
+            VerticalAlignment::Baseline => 0.,
+            VerticalAlignment::Top => ascent,
+            VerticalAlignment::Middle => ascent - (ascent - descent) * 0.5,
+            VerticalAlignment::Bottom => descent,
+            VerticalAlignment::Ratio(r) => ascent - (ascent - descent) * r.clamp(0., 1.),
         };
 
         for instance in &mut instances {
-            instance.position[0] += offset;
+            instance.position[0] += h_offset;
+            instance.position[1] += v_offset;
         }
 
         instances

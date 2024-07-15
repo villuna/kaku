@@ -27,7 +27,8 @@ pub(crate) struct TextData {
     pub(crate) position: [f32; 2],
     pub(crate) color: [f32; 4],
     pub(crate) scale: f32,
-    pub(crate) halign: HorizontalAlign,
+    pub(crate) halign: HorizontalAlignment,
+    pub(crate) valign: VerticalAlignment,
 
     pub(crate) sdf: Option<SdfTextData>,
 }
@@ -61,18 +62,74 @@ impl TextData {
     }
 }
 
-/// Different settings for horizontal text alignment
+/// Settings for horizontal text alignment
 ///
 /// These control where the text drawn is with respect to its position
 #[derive(Copy, Clone, Debug, Default)]
-pub enum HorizontalAlign {
-    /// Text is drawn starting at its position.
+pub enum HorizontalAlignment {
+    /// Anchors the position at the left side of the text.
+    ///
+    /// Text is drawn starting at the render position.
     #[default]
     Left,
-    /// Text is drawn with the position in the center of the string.
+    /// Anchors the position to the middle of the text.
     Center,
-    /// Text is drawn ending at its position.
+    /// Anchors the position at the right side of the text.
+    ///
+    /// Text is drawn ending at the render position.
     Right,
+    /// Anchors the text position at some point between the start and end of the text.
+    ///
+    /// A value of 0 is Left alignment, a value of 1 is Right alignment, and values in between
+    /// shift between the two continuously (e.g., a value of 0.5 is Center alignment).
+    ///
+    /// Values outside the range of 0-1 will be clamped within it.
+    Ratio(f32),
+}
+
+impl HorizontalAlignment {
+    /// The proportion of the alignment.
+    ///
+    /// This ranges from 0-1, where 0 is Left alignment and 1 is Right alignment.
+    pub fn proportion(&self) -> f32 {
+        match self {
+            Self::Left => 0.,
+            Self::Right => 1.,
+            Self::Center => 0.5,
+            Self::Ratio(r) => r.clamp(0., 1.),
+        }
+    }
+}
+
+/// Settings for vertical text alignment.
+///
+/// See <https://freetype.org/freetype2/docs/glyphs/glyphs-3.html> for more info on font metrics.
+#[derive(Default, Copy, Clone, Debug)]
+pub enum VerticalAlignment {
+    /// Anchors the position to the baseline of the text.
+    ///
+    /// In the roman alphabet, the baseline is usually at the bottom of characters such as a, b, c,
+    /// etc. Characters like g or j usually go below the baseline.
+    #[default]
+    Baseline,
+    /// Anchors the position to the highest point of the font.
+    ///
+    /// This means characters will never rise above the render position.
+    Top,
+    /// Anchors the position to be exactly halfway between the highest and lowest points of the
+    /// font.
+    Middle,
+    /// Anchors the position to the lowest point of the font.
+    ///
+    /// This means characters will never go below the render position
+    Bottom,
+    /// Anchors the position at some point between the highest and lowest points of the font.
+    ///
+    /// A value of 0 is Bottom alignment, a value of 1 is Top alignment, and values in between
+    /// shift between the two continuously (e.g., a value of 0.5 is Middle alignment).
+    ///
+    /// Values outside the range of 0-1 will be clamped within it.
+    Ratio(f32),
 }
 
 /// A builder for a [Text] struct.
@@ -85,7 +142,8 @@ pub struct TextBuilder {
     color: [f32; 4],
     scale: f32,
     custom_font_size: Option<f32>,
-    halign: HorizontalAlign,
+    halign: HorizontalAlignment,
+    valign: VerticalAlignment,
 }
 
 impl TextBuilder {
@@ -101,6 +159,7 @@ impl TextBuilder {
             scale: 1.,
             custom_font_size: None,
             halign: Default::default(),
+            valign: Default::default(),
         }
     }
 
@@ -127,6 +186,7 @@ impl TextBuilder {
             color: self.color,
             scale,
             halign: self.halign,
+            valign: self.valign,
 
             sdf: text_renderer.font_uses_sdf(self.font).then(|| SdfTextData {
                 radius: text_renderer
@@ -161,11 +221,17 @@ impl TextBuilder {
 
     /// Sets the horizontal alignment of the text.
     ///
-    /// Left will place the left-hand side of the text at the text's position.
-    /// Right will place the right-hand side of the text at the text's position.
-    /// Centre will place the middle of the text at the text's position.
-    pub fn horizontal_align(&mut self, halign: HorizontalAlign) -> &mut Self {
+    /// See [HorizontalAlignment] for details.
+    pub fn horizontal_align(&mut self, halign: HorizontalAlignment) -> &mut Self {
         self.halign = halign;
+        self
+    }
+
+    /// Sets the vertical alignment of the text.
+    ///
+    /// See [VerticalAlignment] for details.
+    pub fn vertical_align(&mut self, valign: VerticalAlignment) -> &mut Self {
+        self.valign = valign;
         self
     }
 
