@@ -648,42 +648,56 @@ impl TextRenderer {
 
     fn create_text_instances(&self, text: &TextData) -> Vec<CharacterInstance> {
         let mut position = [0., 0.];
+        let scale = text.scale;
         let font = self.fonts.get(text.font);
         let char_cache = &font.char_cache;
-        let scale = text.scale;
-
-        let mut instances: Vec<CharacterInstance> = text
-            .text
-            .chars()
-            .filter_map(|c| {
-                let char_data = char_cache.get(&c).unwrap();
-
-                let result = char_data.texture.as_ref().map(|texture| {
-                    let x = position[0] + texture.position[0] * scale;
-                    let y = position[1] + texture.position[1] * scale;
-
-                    let w = texture.size[0] * scale;
-                    let h = texture.size[1] * scale;
-
-                    CharacterInstance {
-                        position: [x, y],
-                        size: [w, h],
-                    }
-                });
-
-                position[0] += char_data.advance * scale;
-                result
-            })
-            .collect_vec();
-
-        // Apply alignment
-        let text_width = position[0];
-        let h_offset = -text_width * text.halign.proportion();
-
         let scaled_font = font.font.as_scaled(font.scale);
         let ascent = scaled_font.ascent() * scale;
         let descent = scaled_font.descent() * scale;
+        let line_gap = scaled_font.line_gap();
 
+        let mut instances: Vec<CharacterInstance> = text
+            .text
+            .lines()
+            .flat_map(|line| {
+                let mut instances = Vec::new();
+                for c in line.chars() {
+                    let char_data = char_cache.get(&c).unwrap();
+
+                    if let Some(texture) = char_data.texture.as_ref() {
+                        let x = position[0] + texture.position[0] * scale;
+                        let y = position[1] + texture.position[1] * scale;
+
+                        let w = texture.size[0] * scale;
+                        let h = texture.size[1] * scale;
+
+                        instances.push(CharacterInstance {
+                            position: [x, y],
+                            size: [w, h],
+                        });
+                    }
+
+                    position[0] += char_data.advance * scale;
+                }
+
+                // Apply horizontal alignment line by line
+                let text_width = position[0];
+                let h_offset = -text_width * text.halign.proportion();
+
+                for instance in &mut instances {
+                    instance.position[0] += h_offset;
+                }
+
+                // Reset position for the next line
+                position[0] = 0.;
+                position[1] += ascent - descent + line_gap;
+
+                instances
+            })
+            .collect_vec();
+
+        // Apply vertical alignment to the whole text
+        
         let v_offset = match text.valign {
             VerticalAlignment::Baseline => 0.,
             VerticalAlignment::Top => ascent,
@@ -693,7 +707,6 @@ impl TextRenderer {
         };
 
         for instance in &mut instances {
-            instance.position[0] += h_offset;
             instance.position[1] += v_offset;
         }
 
