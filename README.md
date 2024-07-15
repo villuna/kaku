@@ -18,7 +18,7 @@ While SDF rendering has many benefits, it also takes a little bit longer to gene
 
 Here is a screenshot of the demo example, showing some of the things kaku can do:
 
-[Example of kaku rendering text](https://github.com/villuna/kaku/blob/main/images/demo.png)
+![Example of kaku rendering text](https://github.com/villuna/kaku/blob/main/images/demo.png)
 
 This example shows the same text:
 
