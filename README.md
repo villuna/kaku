@@ -1,8 +1,6 @@
 # Kaku
 
-A text rendering crate for rust+wgpu, with the ability to use signed distance fields. (It's still in a WIP state and is not on crates.io, yet).
-
-This crate was originally designed with the intent of allowing fast frame-by-frame rendering of outlined text for a video game I'm working on.
+A text rendering crate for rust+wgpu, with the ability to use signed distance fields.
 
 ## Features
 
@@ -20,7 +18,7 @@ While SDF rendering has many benefits, it also takes a little bit longer to gene
 
 Here is a screenshot of the demo example, showing some of the things kaku can do:
 
-![Example of kaku rendering text](images/demo.png)
+[Example of kaku rendering text](https://github.com/villuna/kaku/blob/main/images/demo.png)
 
 This example shows the same text:
 
