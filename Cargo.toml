@@ -6,7 +6,6 @@ description = "A text rendering crate for wgpu using signed distance fields"
 repository = "https://github.com/villuna/kaku"
 readme = "README.md"
 license = "MIT"
-authors = ["Luna Borella <ulfrthewolf at gmail dot com>"]
 keywords = ["graphics", "text", "wgpu"]
 categories = ["graphics", "rendering"]
 exclude = ["/examples", "/images"]
