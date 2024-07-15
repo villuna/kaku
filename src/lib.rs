@@ -12,7 +12,7 @@
 //! can be drawn.
 //!
 //! ```rust
-//! let mut text_renderer = 
+//! let mut text_renderer =
 //!     TextRendererBuilder::new(target_format, target_size).build(&device);
 //!     
 //! let font = ab_glyph::FontRef::try_from_slice(include_bytes!("FiraSans-Regular.ttf"))?;
@@ -39,7 +39,7 @@
 mod sdf;
 mod text;
 
-pub use text::{HorizontalAlignment, VerticalAlignment, Text, TextBuilder};
+pub use text::{FontSize, HorizontalAlignment, Text, TextBuilder, VerticalAlignment};
 
 use image::GrayImage;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -92,30 +92,34 @@ pub struct FontId(usize);
 #[derive(Debug)]
 struct FontData {
     font: FontArc,
-    size: f32,
+    px_size: f32,
     scale: PxScale,
     char_cache: CharacterCache,
     sdf_settings: Option<SdfSettings>,
 }
 
 impl FontData {
-    fn new(font: FontArc, size: f32) -> Self {
-        let scale = font.pt_to_px_scale(size).unwrap();
+    fn new(font: FontArc, size: FontSize) -> Self {
+        let scale = size.scale(&font);
+        let px_size = size.px_size(&font);
+
         Self {
             font,
             scale,
-            size,
+            px_size,
             sdf_settings: None,
             char_cache: Default::default(),
         }
     }
 
-    fn new_with_sdf(font: FontArc, size: f32, sdf_settings: SdfSettings) -> Self {
-        let scale = font.pt_to_px_scale(size).unwrap();
+    fn new_with_sdf(font: FontArc, size: FontSize, sdf_settings: SdfSettings) -> Self {
+        let scale = size.scale(&font);
+        let px_size = size.px_size(&font);
+
         Self {
             font,
             scale,
-            size,
+            px_size,
             sdf_settings: Some(sdf_settings),
             char_cache: Default::default(),
         }
@@ -129,14 +133,19 @@ struct FontMap {
 
 impl FontMap {
     /// Load a font into the map
-    fn load(&mut self, font: FontArc, size: f32) -> FontId {
+    fn load(&mut self, font: FontArc, size: FontSize) -> FontId {
         let id = self.fonts.len();
         self.fonts.push(FontData::new(font, size));
         FontId(id)
     }
 
     /// Load a font into the map with sdf rendering enabled
-    fn load_with_sdf(&mut self, font: FontArc, size: f32, sdf_settings: SdfSettings) -> FontId {
+    fn load_with_sdf(
+        &mut self,
+        font: FontArc,
+        size: FontSize,
+        sdf_settings: SdfSettings,
+    ) -> FontId {
         let id = self.fonts.len();
         self.fonts
             .push(FontData::new_with_sdf(font, size, sdf_settings));
@@ -322,14 +331,12 @@ fn create_text_pipeline(
             topology: wgpu::PrimitiveTopology::TriangleStrip,
             ..Default::default()
         },
-        depth_stencil: depth_format.map(|format| {
-            DepthStencilState {
-                format,
-                depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::Always,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }
+        depth_stencil: depth_format.map(|format| DepthStencilState {
+            format,
+            depth_write_enabled: false,
+            depth_compare: wgpu::CompareFunction::Always,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
         }),
         multisample: wgpu::MultisampleState {
             count: samples,
@@ -482,7 +489,7 @@ impl TextRenderer {
             target_format,
             msaa_samples,
             &basic_shader,
-            depth_stencil_state.clone(),
+            depth_stencil_state,
             device,
         );
 
@@ -505,7 +512,7 @@ impl TextRenderer {
             target_format,
             msaa_samples,
             &sdf_shader,
-            depth_stencil_state.clone(),
+            depth_stencil_state,
             device,
         );
 
@@ -556,7 +563,7 @@ impl TextRenderer {
     }
 
     /// Loads a font for use in the text renderer
-    pub fn load_font<F>(&mut self, font: F, size: f32) -> FontId
+    pub fn load_font<F>(&mut self, font: F, size: FontSize) -> FontId
     where
         F: Font + Send + Sync + 'static,
     {
@@ -565,12 +572,16 @@ impl TextRenderer {
 
     /// Loads a font for use in the text renderer with sdf rendering.
     ///
-    /// There are no requirements on the font, any font can be used for sdf rendering. A font with
-    /// SDF enabled can be scaled up without pixellation, and can have effects applied to it.
-    /// However, creating the textures for each character will take longer and the textures will
-    /// take up more space on the GPU. So if you don't need any of these effects, use
-    /// [TextRenderer::load_font] instead.
-    pub fn load_font_with_sdf<F>(&mut self, font: F, size: f32, sdf_settings: SdfSettings) -> FontId
+    /// Sny font can be used for sdf rendering. A font with SDF enabled can be scaled up without
+    /// pixellation, and can have effects applied to it. However, creating the textures for each
+    /// character will take longer and the textures will take up more space on the GPU. So if you
+    /// don't need any of these effects, use [TextRenderer::load_font] instead.
+    pub fn load_font_with_sdf<F>(
+        &mut self,
+        font: F,
+        size: FontSize,
+        sdf_settings: SdfSettings,
+    ) -> FontId
     where
         F: Font + Send + Sync + 'static,
     {
@@ -670,8 +681,8 @@ impl TextRenderer {
         let h_offset = -text_width * text.halign.proportion();
 
         let scaled_font = font.font.as_scaled(font.scale);
-        let ascent = scaled_font.ascent();
-        let descent = scaled_font.descent();
+        let ascent = scaled_font.ascent() * scale;
+        let descent = scaled_font.descent() * scale;
 
         let v_offset = match text.valign {
             VerticalAlignment::Baseline => 0.,

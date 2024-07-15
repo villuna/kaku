@@ -22,7 +22,7 @@ use winit::{
 const WINDOW_WIDTH: u32 = 1600;
 const WINDOW_HEIGHT: u32 = 700;
 
-use kaku::{SdfSettings, Text, TextBuilder, TextRenderer, TextRendererBuilder};
+use kaku::{FontSize, SdfSettings, Text, TextBuilder, TextRenderer, TextRendererBuilder};
 
 fn hsva_to_rgba(mut h: f32, mut s: f32, mut v: f32, a: f32) -> [f32; 4] {
     s = s.clamp(0., 1.);
@@ -89,9 +89,12 @@ impl BasicTextAppInner {
             FontRef::try_from_slice(include_bytes!("../fonts/FiraSans-Regular.ttf")).unwrap(),
         );
 
-        let fira_sans_sdf =
-            text_renderer.load_font_with_sdf(fira_sans.clone(), 60., SdfSettings { radius: 20.0 });
-        let fira_sans = text_renderer.load_font(fira_sans, 60.);
+        let fira_sans_sdf = text_renderer.load_font_with_sdf(
+            fira_sans.clone(),
+            FontSize::Pt(60.),
+            SdfSettings { radius: 20.0 },
+        );
+        let fira_sans = text_renderer.load_font(fira_sans, FontSize::Pt(60.));
 
         // If you want to create a lot of similar text with slightly different options, you can use
         // the TextBuilder in a stateful way:
@@ -111,7 +114,7 @@ impl BasicTextAppInner {
             builder.build(&renderer.device, &renderer.queue, &mut text_renderer);
 
         builder.position([50., 520.]);
-        builder.font_size(Some(120.));
+        builder.font_size(Some(FontSize::Pt(120.)));
         builder.color([0., 0., 0., 1.]);
         builder.no_outline();
         let hello_world_scaled =

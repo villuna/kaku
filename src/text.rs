@@ -3,6 +3,7 @@
 //! The main type here is [Text], which can be created using [TextRenderer::create_text]. This is a
 //! piece of text which can be drawn to the screen with a variety of effects.
 
+use ab_glyph::{Font, PxScale};
 use wgpu::util::DeviceExt;
 
 use crate::{FontId, TextRenderer};
@@ -59,6 +60,28 @@ impl TextData {
             image_scale: self.scale,
             _padding: [0.; 3],
         }
+    }
+}
+
+/// Settings for font size.
+#[derive(Debug, Copy, Clone)]
+pub enum FontSize {
+    /// A font's size in pt.
+    Pt(f32),
+    /// A font's size in px.
+    Px(f32),
+}
+
+impl FontSize {
+    pub(crate) fn scale(&self, font: &impl Font) -> PxScale {
+        match self {
+            FontSize::Px(px) => font.pt_to_px_scale(*px * (72. / 96.)).unwrap(),
+            FontSize::Pt(pt) => font.pt_to_px_scale(*pt).unwrap(),
+        }
+    }
+
+    pub(crate) fn px_size(&self, font: &impl Font) -> f32 {
+        self.scale(font).y
     }
 }
 
@@ -141,7 +164,7 @@ pub struct TextBuilder {
     outline: Option<Outline>,
     color: [f32; 4],
     scale: f32,
-    custom_font_size: Option<f32>,
+    custom_font_size: Option<FontSize>,
     halign: HorizontalAlignment,
     valign: VerticalAlignment,
 }
@@ -174,8 +197,10 @@ impl TextBuilder {
         let scale = match self.custom_font_size {
             None => self.scale,
             Some(size) => {
-                let font_size = text_renderer.fonts.get(self.font).size;
-                (size / font_size) * self.scale
+                let self_size = size.px_size(&text_renderer.fonts.get(self.font).font);
+                let font_size = text_renderer.fonts.get(self.font).px_size;
+
+                self.scale * (self_size / font_size)
             }
         };
 
@@ -286,7 +311,7 @@ impl TextBuilder {
     ///
     /// Fonts are loaded with a certain fixed size, but this function allows you to scale the text
     /// to a different size after the fact.
-    pub fn font_size(&mut self, size: Option<f32>) -> &mut Self {
+    pub fn font_size(&mut self, size: Option<FontSize>) -> &mut Self {
         self.custom_font_size = size;
         self
     }

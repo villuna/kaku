@@ -22,7 +22,10 @@ use winit::{
 const WINDOW_WIDTH: u32 = 800;
 const WINDOW_HEIGHT: u32 = 600;
 
-use kaku::{HorizontalAlignment, Text, TextBuilder, TextRenderer, TextRendererBuilder, VerticalAlignment};
+use kaku::{
+    FontSize, HorizontalAlignment, Text, TextBuilder, TextRenderer, TextRendererBuilder,
+    VerticalAlignment,
+};
 
 struct BasicTextAppInner {
     renderer: Renderer,
@@ -56,7 +59,7 @@ impl BasicTextAppInner {
         let fira_sans = FontArc::new(
             FontRef::try_from_slice(include_bytes!("../fonts/FiraSans-Regular.ttf")).unwrap(),
         );
-        let fira_sans = text_renderer.load_font(fira_sans, 40.);
+        let fira_sans = text_renderer.load_font(fira_sans, FontSize::Pt(40.));
 
         let mut builder = TextBuilder::new("hello!", fira_sans, [50., 100.]);
         builder.vertical_align(VerticalAlignment::Baseline);
@@ -74,7 +77,8 @@ impl BasicTextAppInner {
         builder.position([630., 100.]);
         let valign_bottom = builder.build(&renderer.device, &renderer.queue, &mut text_renderer);
 
-        let mut builder = TextBuilder::new("hello, align!", fira_sans, [WINDOW_WIDTH as f32 / 2., 300.]);
+        let mut builder =
+            TextBuilder::new("hello, align!", fira_sans, [WINDOW_WIDTH as f32 / 2., 300.]);
         builder.horizontal_align(HorizontalAlignment::Left);
         let halign_left = builder.build(&renderer.device, &renderer.queue, &mut text_renderer);
 
