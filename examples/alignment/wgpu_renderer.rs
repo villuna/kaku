@@ -44,6 +44,7 @@ impl Renderer {
                             wgpu::Limits::default()
                         },
                         label: None,
+                        memory_hints: wgpu::MemoryHints::Performance,
                     },
                     None, // Trace path
                 )

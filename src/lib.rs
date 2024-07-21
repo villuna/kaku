@@ -55,7 +55,7 @@ use log::info;
 use sdf::create_sdf_texture;
 use text::{SdfSettingsUniform, SettingsUniform};
 use wgpu::{
-    include_wgsl, util::DeviceExt, DepthStencilState, TextureFormat, TextureViewDescriptor,
+    include_wgsl, util::DeviceExt, DepthStencilState, TextureFormat, TextureViewDescriptor
 };
 
 type HashMap<K, V> = AHashMap<K, V>;
@@ -245,15 +245,16 @@ fn character_instance_layout() -> wgpu::VertexBufferLayout<'static> {
 }
 
 /// A builder for a [TextRenderer] struct.
-#[derive(Clone, Debug, Hash, Eq, PartialEq)]
-pub struct TextRendererBuilder {
+#[derive(Clone, Debug)]
+pub struct TextRendererBuilder<'a> {
     target_format: wgpu::TextureFormat,
     target_size: (u32, u32),
     msaa_samples: u32,
     depth_format: Option<TextureFormat>,
+    pipeline_cache: Option<&'a wgpu::PipelineCache>,
 }
 
-impl TextRendererBuilder {
+impl<'a> TextRendererBuilder<'a> {
     /// Creates a new TextRendererBuilder.
     ///
     /// This function takes in the format of the target surface that the TextRenderer will draw
@@ -264,6 +265,7 @@ impl TextRendererBuilder {
             target_size,
             msaa_samples: 1,
             depth_format: None,
+            pipeline_cache: None,
         }
     }
 
@@ -286,6 +288,15 @@ impl TextRendererBuilder {
         self
     }
 
+    /// Sets the text renderer to use a pipeline cache.
+    ///
+    /// If this is set, then the text renderer will use this to cache its pipelines. See
+    /// [wgpu::PipelineCache] for more info.
+    pub fn with_pipeline_cache(mut self, cache: &'a wgpu::PipelineCache) -> Self {
+        self.pipeline_cache = Some(cache);
+        self
+    }
+
     /// Creates a new TextRenderer from the current configuration.
     pub fn build(self, device: &wgpu::Device) -> TextRenderer {
         TextRenderer::new(
@@ -294,6 +305,7 @@ impl TextRendererBuilder {
             self.target_size,
             self.msaa_samples,
             self.depth_format,
+            self.pipeline_cache,
         )
     }
 }
@@ -305,6 +317,7 @@ fn create_text_pipeline(
     samples: u32,
     shader: &wgpu::ShaderModule,
     depth_format: Option<TextureFormat>,
+    cache: Option<&wgpu::PipelineCache>,
     device: &wgpu::Device,
 ) -> wgpu::RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -343,6 +356,7 @@ fn create_text_pipeline(
             alpha_to_coverage_enabled: false,
         },
         multiview: None,
+        cache,
     })
 }
 
@@ -375,6 +389,7 @@ impl TextRenderer {
         target_size: (u32, u32),
         msaa_samples: u32,
         depth_stencil_state: Option<TextureFormat>,
+        cache: Option<&wgpu::PipelineCache>,
     ) -> Self {
         // Texture bind group layout to use when creating cached char textures
         let char_bind_group_layout =
@@ -489,6 +504,7 @@ impl TextRenderer {
             msaa_samples,
             &basic_shader,
             depth_stencil_state,
+            cache,
             device,
         );
 
@@ -512,6 +528,7 @@ impl TextRenderer {
             msaa_samples,
             &sdf_shader,
             depth_stencil_state,
+            cache,
             device,
         );
 
@@ -525,6 +542,7 @@ impl TextRenderer {
             msaa_samples,
             &outline_shader,
             depth_stencil_state,
+            cache,
             device,
         );
 
@@ -571,10 +589,9 @@ impl TextRenderer {
 
     /// Loads a font for use in the text renderer with sdf rendering.
     ///
-    /// Sny font can be used for sdf rendering. A font with SDF enabled can be scaled up without
+    /// Any font can be used for sdf rendering. A font with SDF enabled can be scaled up without
     /// pixellation, and can have effects applied to it. However, creating the textures for each
-    /// character will take longer and the textures will take up more space on the GPU. So if you
-    /// don't need any of these effects, use [TextRenderer::load_font] instead.
+    /// character will take longer.
     pub fn load_font_with_sdf<F>(
         &mut self,
         font: F,
