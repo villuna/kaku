@@ -606,11 +606,7 @@ impl TextRenderer {
     }
 
     /// Draws a [Text] object to the given render pass.
-    pub fn draw_text<'pass>(
-        &'pass self,
-        render_pass: &mut wgpu::RenderPass<'pass>,
-        text: &'pass Text,
-    ) {
+    pub fn draw_text(&self, render_pass: &mut wgpu::RenderPass<'_>, text: &Text) {
         // Set the pipeline depending on if the font uses sdf
         let use_sdf = self.font_uses_sdf(text.data.font);
         let use_outline = text.data.sdf.is_some_and(|sdf| sdf.outline.is_some());
