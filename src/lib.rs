@@ -571,7 +571,7 @@ impl TextRenderer {
 
     /// Loads a font for use in the text renderer with sdf rendering.
     ///
-    /// Sny font can be used for sdf rendering. A font with SDF enabled can be scaled up without
+    /// Any font can be used for sdf rendering. A font with SDF enabled can be scaled up without
     /// pixellation, and can have effects applied to it. However, creating the textures for each
     /// character will take longer and the textures will take up more space on the GPU. So if you
     /// don't need any of these effects, use [TextRenderer::load_font] instead.
