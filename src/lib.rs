@@ -615,7 +615,7 @@ impl TextRenderer {
             render_pass.set_pipeline(&self.outline_pipeline);
 
             let mut i = 0;
-            for c in text.data.text.chars() {
+            for c in text.data.text.lines().flat_map(|s| s.chars()) {
                 let char_data = font_data.char_cache.get(&c).unwrap();
 
                 if let Some(texture) = &char_data.texture {
@@ -629,7 +629,7 @@ impl TextRenderer {
         }
 
         let mut i = 0;
-        for c in text.data.text.chars() {
+        for c in text.data.text.lines().flat_map(|s| s.chars()) {
             let char_data = font_data.char_cache.get(&c).unwrap();
 
             if let Some(texture) = &char_data.texture {
