@@ -14,7 +14,7 @@
 //! ```rust
 //! let mut text_renderer =
 //!     TextRendererBuilder::new(target_format, target_size).build(&device);
-//!     
+//!
 //! let font = ab_glyph::FontRef::try_from_slice(include_bytes!("FiraSans-Regular.ttf"))?;
 //! let font = text_renderer.load_font_with_sdf(font, 45., SdfSettings { radius: 15. });
 //!
@@ -55,7 +55,7 @@ use log::info;
 use sdf::create_sdf_texture;
 use text::{SdfSettingsUniform, SettingsUniform};
 use wgpu::{
-    include_wgsl, util::DeviceExt, DepthStencilState, TextureFormat, TextureViewDescriptor
+    include_wgsl, util::DeviceExt, DepthStencilState, TextureFormat, TextureViewDescriptor,
 };
 
 type HashMap<K, V> = AHashMap<K, V>;
@@ -325,13 +325,13 @@ fn create_text_pipeline(
         layout: Some(layout),
         vertex: wgpu::VertexState {
             module: shader,
-            entry_point: "vs_main",
+            entry_point: Some("vs_main"),
             buffers: &[texture_vertex_layout(), character_instance_layout()],
             compilation_options: Default::default(),
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
-            entry_point: "fs_main",
+            entry_point: Some("fs_main"),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: render_format,
@@ -882,14 +882,14 @@ impl TextRenderer {
         });
 
         queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             image,
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(image.width()),
                 rows_per_image: Some(image.height()),
